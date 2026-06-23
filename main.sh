@@ -187,7 +187,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}Простой менеджер SYN FIX${NC}"
+    echo -e "  ${BOLD}Простой менеджерЫЫ2 SYN FIX${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -202,7 +202,7 @@ show_header() {
             fi
         else
             # Любой другой SYN фикс (не наш)
-            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (ДРУГОЙ SYN)${NC}"
+            echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (сторонний)${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
