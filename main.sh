@@ -172,7 +172,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}Простой менеджер47 SYN FIX${NC}"
+    echo -e "  ${BOLD}Простой менеджер48 SYN FIX${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
