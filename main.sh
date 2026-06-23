@@ -41,6 +41,22 @@ save_port() {
     echo "$1" > "$PORT_FILE"
 }
 
+# ── Удаление всех наших строк из .rules файлов ──────────────
+clean_our_rules_from_files() {
+    find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
+        if grep -q 'mtpr_syn_fix' "$file"; then
+            cp "$file" "$file.bak.$(date +%s)"
+            # Удаляем строки с комментарием и сами правила (содержащие mtpr_syn_fix)
+            sed -i '/mtpr_syn_fix/d' "$file"
+            # Также удаляем строку с комментарием (если осталась)
+            sed -i '/# MTProxy SYN FIX by MEKO/d' "$file"
+            # Удаляем пустые строки
+            sed -i '/^$/d' "$file"
+            log_info "Очищен файл: $file"
+        fi
+    done
+}
+
 # ── ПРОВЕРКА НАЛИЧИЯ ЛЮБОГО ПРАВИЛА С tcp И syn ────────────
 is_syn_fix_installed() {
     if iptables-save 2>/dev/null | grep -iE 'tcp.*syn|syn.*tcp' | grep -q .; then
@@ -52,7 +68,7 @@ is_syn_fix_installed() {
     return 1
 }
 
-# ── ПРОВЕРКА НАШЕГО ПРАВИЛА (по комментарию) ────────────────
+# ── ПРОВЕРКА НАЛИЧИЯ НАШИХ ПРАВИЛ (по комментарию) ─────────
 is_our_syn_fix_installed() {
     if iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'; then
         return 0
@@ -114,22 +130,22 @@ install_syn_fix() {
 
     ufw --force enable
 
-    # Добавляем наши правила в /etc/ufw/before.rules (если их там ещё нет)
-    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
-        sed -i "/COMMIT/ i\
+    # Удаляем все старые наши строки из файлов, чтобы не было дубликатов
+    clean_our_rules_from_files
+
+    # Добавляем наши правила в /etc/ufw/before.rules
+    cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+    sed -i "/COMMIT/ i\
 # MTProxy SYN FIX by MEKO (mtpr_syn_fix)\n\
 -A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT\n\
 -A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" /etc/ufw/before.rules
 
-        if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-            log_info "COMMIT не найден, добавляем в конец before.rules"
-            echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
-            echo "-A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT" >> /etc/ufw/before.rules
-            echo "-A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" >> /etc/ufw/before.rules
-        fi
-    else
-        log_info "Наши правила уже есть в before.rules"
+    # Если COMMIT не найден, добавляем в конец
+    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+        log_info "COMMIT не найден, добавляем в конец before.rules"
+        echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
+        echo "-A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT" >> /etc/ufw/before.rules
+        echo "-A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" >> /etc/ufw/before.rules
     fi
 
     save_port "$port"
@@ -155,16 +171,8 @@ remove_syn_fix() {
         iptables -D ufw-before-input "$num" 2>/dev/null && log_info "Удалено правило #$num из iptables"
     done
 
-    # 2. Удаляем строки с tcp и syn из всех .rules файлов в /etc/ufw/
-    find /etc/ufw/ -name '*.rules' -type f | while read -r file; do
-        if grep -qiE 'tcp.*syn|syn.*tcp' "$file"; then
-            cp "$file" "$file.bak.$(date +%s)"
-            sed -i '/tcp.*syn/d' "$file"
-            sed -i '/syn.*tcp/d' "$file"
-            sed -i '/^$/d' "$file"
-            log_info "Очищен файл: $file"
-        fi
-    done
+    # 2. Удаляем все наши строки из файлов
+    clean_our_rules_from_files
 
     ufw reload
     rm -f "$PORT_FILE"
