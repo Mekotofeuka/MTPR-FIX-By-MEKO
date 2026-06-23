@@ -5,7 +5,19 @@
 set -eo pipefail
 
 # ── Конфиг ─────────────────────────────────────────────────────
-SCRIPT_URL="https://raw.githubusercontent.com/Mekotofeuka/MTPR-FIX-By-MEKO/main/main.sh"
+REPO="Mekotofeuka/MTPR-FIX-By-MEKO"
+LATEST_TAG=""
+get_latest_tag() {
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+    if [ -z "$LATEST_TAG" ]; then
+        return 1
+    fi
+    return 0
+}
+
+get_latest_tag || LATEST_TAG="0.1"  # fallback
+
+SCRIPT_URL="https://raw.githubusercontent.com/$REPO/$LATEST_TAG/main.sh"
 LOCAL_FILE="/opt/mtpr-simple/main.sh"
 VERSION_FILE="/opt/mtpr-simple/version"
 PORT_FILE="/opt/mtpr-simple/port"
@@ -31,22 +43,38 @@ check_update() {
         return 1
     fi
     
+    # Проверяем, не изменился ли тег
+    local remote_tag=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+    local current_tag=$(cat "$VERSION_FILE" 2>/dev/null)
+    
+    if [ -n "$remote_tag" ] && [ "$remote_tag" != "$current_tag" ]; then
+        return 0 # есть обновление (новый тег)
+    fi
+    
+    # Дополнительно проверяем хэш на случай правок в том же теге
     local remote_hash=$(curl -fsSL "$SCRIPT_URL" 2>/dev/null | md5sum | awk '{print $1}')
-    local local_hash=$(cat "$VERSION_FILE" 2>/dev/null)
+    local local_hash=$(cat /opt/mtpr-simple/hash 2>/dev/null)
     
     if [ -n "$remote_hash" ] && [ "$remote_hash" != "$local_hash" ]; then
-        return 0 # есть обновление
+        return 0 # есть обновление (изменился файл)
     fi
+    
     return 1 # нет обновления
 }
 
 # ── Обновление ───────────────────────────────────────────────
 do_update() {
     log_info "Обнаружено обновление!"
+    
+    # Обновляем тег если нужно
+    get_latest_tag || true
+    SCRIPT_URL="https://raw.githubusercontent.com/$REPO/$LATEST_TAG/main.sh"
+    
     curl -fsSL "$SCRIPT_URL" -o "$LOCAL_FILE"
     chmod +x "$LOCAL_FILE"
-    md5sum "$LOCAL_FILE" | awk '{print $1}' > "$VERSION_FILE"
-    log_success "Обновлено!"
+    echo "$LATEST_TAG" > "$VERSION_FILE"
+    md5sum "$LOCAL_FILE" | awk '{print $1}' > /opt/mtpr-simple/hash
+    log_success "Обновлено до версии $LATEST_TAG!"
     echo ""
     echo -e "  ${BOLD}Перезапуск...${NC}"
     sleep 1
