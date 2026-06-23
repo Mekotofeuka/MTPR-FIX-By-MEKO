@@ -26,9 +26,9 @@ check_root() {
     fi
 }
 
-# ── Проверка, установлен ли НАШ SYN FIX ─────────────────────
+# ── Проверка наличия НАШЕГО SYN FIX в файле before.rules ────
 is_our_syn_fix_installed() {
-    iptables-save 2>/dev/null | grep -q 'mtpr_syn_fix'
+    grep -q 'mtpr_syn_fix' /etc/ufw/before.rules 2>/dev/null
     return $?
 }
 
@@ -36,7 +36,7 @@ is_our_syn_fix_installed() {
 install_syn_fix() {
     log_info "Установка SYN FIX..."
 
-    # Обновляем пакеты и ставим ufw (вывод виден)
+    # Убеждаемся, что ufw установлен и включен
     apt update
     apt install ufw -y
 
@@ -44,42 +44,23 @@ install_syn_fix() {
     ufw allow 443/tcp
 
     ufw --force enable
+
+    # Добавляем наши правила в /etc/ufw/before.rules (если их там ещё нет)
+    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+        # Создаём резервную копию
+        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+        
+        # Вставляем наши правила перед строкой COMMIT
+        sed -i '/^COMMIT$/ i\
+# MTProxy SYN FIX by MEKO (mtpr_syn_fix)\n\
+-A ufw-before-input -p tcp --dport 443 --syn -m hashlimit --hashlimit-name mtproto_443 --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment "mtpr_syn_fix" -j ACCEPT\n\
+-A ufw-before-input -p tcp --dport 443 --syn -j REJECT --reject-with tcp-reset' /etc/ufw/before.rules
+    else
+        log_info "Правила уже присутствуют в before.rules"
+    fi
+
+    # Перезагружаем ufw, чтобы применить изменения из файла
     ufw reload
-
-    # Добавляем наши правила (если уже есть, то заменим – но по логике меню их нет)
-    # Сначала удалим наши старые правила, чтобы не дублировать (на случай, если они остались)
-    iptables -D ufw-before-input \
-        -p tcp --dport 443 --syn \
-        -m hashlimit \
-        --hashlimit-name mtproto_443 \
-        --hashlimit-mode srcip \
-        --hashlimit-upto 54/minute \
-        --hashlimit-burst 1 \
-        --hashlimit-htable-expire 60000 \
-        --hashlimit-htable-size 32768 \
-        -m comment --comment "mtpr_syn_fix" \
-        -j ACCEPT 2>/dev/null || true
-
-    iptables -D ufw-before-input \
-        -p tcp --dport 443 --syn \
-        -j REJECT --reject-with tcp-reset 2>/dev/null || true
-
-    # Вставляем новые правила
-    iptables -I ufw-before-input 1 \
-        -p tcp --dport 443 --syn \
-        -m hashlimit \
-        --hashlimit-name mtproto_443 \
-        --hashlimit-mode srcip \
-        --hashlimit-upto 54/minute \
-        --hashlimit-burst 1 \
-        --hashlimit-htable-expire 60000 \
-        --hashlimit-htable-size 32768 \
-        -m comment --comment "mtpr_syn_fix" \
-        -j ACCEPT
-
-    iptables -I ufw-before-input 2 \
-        -p tcp --dport 443 --syn \
-        -j REJECT --reject-with tcp-reset
 
     log_success "SYN FIX успешно установлен"
 }
@@ -88,22 +69,19 @@ install_syn_fix() {
 remove_syn_fix() {
     log_info "Удаление SYN FIX..."
 
-    # Удаляем только наши правила (с комментарием)
-    iptables -D ufw-before-input \
-        -p tcp --dport 443 --syn \
-        -m hashlimit \
-        --hashlimit-name mtproto_443 \
-        --hashlimit-mode srcip \
-        --hashlimit-upto 54/minute \
-        --hashlimit-burst 1 \
-        --hashlimit-htable-expire 60000 \
-        --hashlimit-htable-size 32768 \
-        -m comment --comment "mtpr_syn_fix" \
-        -j ACCEPT 2>/dev/null || true
+    if grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
+        # Создаём бэкап
+        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
+        # Удаляем наши строки (включая комментарий)
+        sed -i '/# MTProxy SYN FIX by MEKO (mtpr_syn_fix)/,/^-A ufw-before-input -p tcp --dport 443 --syn -j REJECT --reject-with tcp-reset/d' /etc/ufw/before.rules
+        # Также удаляем пустые строки, оставшиеся после удаления
+        sed -i '/^$/d' /etc/ufw/before.rules
+    else
+        log_info "Наши правила не найдены в before.rules"
+    fi
 
-    iptables -D ufw-before-input \
-        -p tcp --dport 443 --syn \
-        -j REJECT --reject-with tcp-reset 2>/dev/null || true
+    # Перезагружаем ufw
+    ufw reload
 
     log_success "SYN FIX удалён"
 }
