@@ -1,9 +1,14 @@
 #!/bin/bash
 # Простой менеджер SYN FIX
 # Меню: 1) Install/Remove SYN FIX, 2) Optimization, 0) Exit
-# Запуск: сохраните как /usr/local/bin/mekopr и дайте права на выполнение (chmod +x)
 
 set -eo pipefail
+
+# ── Конфиг ─────────────────────────────────────────────────────
+SCRIPT_URL="https://raw.githubusercontent.com/Mekotofeuka/MTPR-FIX-By-MEKO/main/main.sh"
+LOCAL_FILE="/opt/mtpr-simple/main.sh"
+VERSION_FILE="/opt/mtpr-simple/version"
+PORT_FILE="/opt/mtpr-simple/port"
 
 # ── Цвета ─────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -20,6 +25,35 @@ log_info()    { echo -e "  ${BLUE}[i]${NC} $1"; }
 log_success() { echo -e "  ${GREEN}[✓]${NC} $1"; }
 log_error()   { echo -e "  ${RED}[✗]${NC} $1" >&2; }
 
+# ── Проверка обновлений ──────────────────────────────────────
+check_update() {
+    if [ ! -f "$LOCAL_FILE" ] || [ ! -f "$VERSION_FILE" ]; then
+        return 1
+    fi
+    
+    local remote_hash=$(curl -fsSL "$SCRIPT_URL" 2>/dev/null | md5sum | awk '{print $1}')
+    local local_hash=$(cat "$VERSION_FILE" 2>/dev/null)
+    
+    if [ -n "$remote_hash" ] && [ "$remote_hash" != "$local_hash" ]; then
+        return 0 # есть обновление
+    fi
+    return 1 # нет обновления
+}
+
+# ── Обновление ───────────────────────────────────────────────
+do_update() {
+    log_info "Обнаружено обновление!"
+    curl -fsSL "$SCRIPT_URL" -o "$LOCAL_FILE"
+    chmod +x "$LOCAL_FILE"
+    md5sum "$LOCAL_FILE" | awk '{print $1}' > "$VERSION_FILE"
+    log_success "Обновлено!"
+    echo ""
+    echo -e "  ${BOLD}Перезапуск...${NC}"
+    sleep 1
+    exec "$LOCAL_FILE" </dev/tty
+    exit 0
+}
+
 # ── Проверка root ────────────────────────────────────────────
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -29,8 +63,6 @@ check_root() {
 }
 
 # ── Файл для хранения порта ─────────────────────────────────
-PORT_FILE="/opt/mtpr-simple/port"
-
 get_saved_port() {
     if [ -f "$PORT_FILE" ]; then
         cat "$PORT_FILE"
@@ -187,7 +219,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}Простой менеджерЫ3 SYN FIX${NC}"
+    echo -e "  ${BOLD}Простой менеджер SYN FIX${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -201,14 +233,13 @@ show_header() {
                 echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC}"
             fi
         else
-            # Любой другой SYN фикс (не наш)
             echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Установлен (сторонний)${NC}"
         fi
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
     fi
 
-    # Telemt — теперь с цветом: зелёным если установлен, красным если нет
+    # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_info=""
         local configs=(
@@ -242,6 +273,11 @@ show_header() {
 # ── Главное меню ─────────────────────────────────────────────
 main_menu() {
     while true; do
+        # Проверяем обновления при каждом входе в меню
+        if check_update; then
+            do_update
+        fi
+        
         show_header
 
         if is_syn_fix_installed; then
@@ -266,7 +302,6 @@ main_menu() {
                     echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                     local confirm
                     read -r confirm
-                    # Пустой ввод (Enter) считается как Yes
                     if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
@@ -299,4 +334,10 @@ main_menu() {
 
 # ── Запуск ────────────────────────────────────────────────────
 check_root
+
+# Первая проверка обновлений при старте
+if check_update; then
+    do_update
+fi
+
 main_menu
