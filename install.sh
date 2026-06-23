@@ -13,14 +13,12 @@ fi
 
 mkdir -p /opt/mtpr-simple
 
-# ВСЕГДА ЧИСТО ПЕРЕКАЧИВАЕМ
 rm -f "$LOCAL_FILE"
 
-curl -fsSL --no-cache --retry 3 "$SCRIPT_URL" -o "$LOCAL_FILE"
+curl -fsSL "$SCRIPT_URL" -o "$LOCAL_FILE"
 
 chmod +x "$LOCAL_FILE"
 
-# обновляем хеш
 md5sum "$LOCAL_FILE" | awk '{print $1}' > "$VERSION_FILE"
 
 ln -sf "$LOCAL_FILE" /usr/local/bin/mekopr
