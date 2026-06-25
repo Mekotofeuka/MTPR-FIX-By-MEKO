@@ -346,7 +346,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.6${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.61${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -446,7 +446,9 @@ main_menu() {
                         log_info "Отмена удаления"
                     fi
                 else
-                    install_syn_fix
+                    if ! install_syn_fix; then
+                        continue
+                    fi
                 fi
                 echo ""
                 read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
