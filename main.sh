@@ -326,29 +326,21 @@ EOF
 
     # Функция применения sysctl
     apply_sysctl() {
-        local key="$1"
-        local value="$2"
+        cat >/etc/sysctl.d/99-custom.conf <<EOF
+net.ipv4.tcp_fastopen=3
+net.core.somaxconn=65535
+net.ipv4.tcp_max_syn_backlog=65535
+net.core.netdev_max_backlog=65535
+fs.file-max=2097152
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_keepalive_time=45
+net.ipv4.tcp_keepalive_intvl=15
+net.ipv4.tcp_keepalive_probes=3
+EOF
 
-        if [ "$(sysctl -n "$key" 2>/dev/null)" != "$value" ]; then
-            sysctl -w "$key=$value"
-            sed -i "/^${key}=*/d" /etc/sysctl.conf
-            sed -i "/^${key} =.*/d" /etc/sysctl.conf
-            echo "$key=$value" >>/etc/sysctl.conf
-        fi
+        sysctl --system 2>/dev/null || log_info "sysctl --system выполнен без изменений"
     }
-
-    apply_sysctl net.ipv4.tcp_fastopen 3
-    apply_sysctl net.core.somaxconn 65535
-    apply_sysctl net.ipv4.tcp_max_syn_backlog 65535
-    apply_sysctl net.core.netdev_max_backlog 65535
-    apply_sysctl fs.file-max 2097152
-    apply_sysctl net.core.default_qdisc fq
-    apply_sysctl net.ipv4.tcp_congestion_control bbr
-    apply_sysctl net.ipv4.tcp_keepalive_time 45
-    apply_sysctl net.ipv4.tcp_keepalive_intvl 15
-    apply_sysctl net.ipv4.tcp_keepalive_probes 3
-
-    sysctl --system 2>/dev/null || log_info "sysctl --system выполнен без изменений"
 
     systemctl stop telemt
 
