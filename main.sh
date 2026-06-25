@@ -1,8 +1,4 @@
 #!/bin/bash
-# Простой менеджер SYN FIX
-# Меню: 1) Install/Remove SYN FIX, 2) Optimization, 0) Exit
-# Запуск: сохраните как /usr/local/bin/mekopr и дайте права на выполнение (chmod +x)
-
 set -eo pipefail
 
 # ── Цвета ─────────────────────────────────────────────────────
@@ -11,6 +7,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+GRAY='\033[0;90m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -92,6 +89,35 @@ detect_telemt() {
     fi
 }
 
+# ── ПРОВЕРКА НАЛИЧИЯ MSS В КОНФИГЕ TELEMT ──────────────────
+is_mss_enabled() {
+    local config="/etc/telemt/telemt.toml"
+    if [ -f "$config" ]; then
+        if grep -qi 'mss' "$config" | grep -v '^#' | grep -q .; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# ── ОТКЛЮЧЕНИЕ MSS (закомментирование строк с mss) ────────
+disable_mss() {
+    local config="/etc/telemt/telemt.toml"
+    if [ ! -f "$config" ]; then
+        log_error "Файл $config не найден"
+        return 1
+    fi
+    
+    if ! is_mss_enabled; then
+        log_info "MSS уже отключен"
+        return 0
+    fi
+    
+    log_info "Отключение MSS в $config..."
+    sed -i 's/^[[:space:]]*\(.*mss.*\)/#\1/i' "$config"
+    log_success "MSS отключен (строки с mss закомментированы)"
+}
+
 # ── Установка SYN FIX ──────────────────────────────────────
 install_syn_fix() {
     local port
@@ -113,29 +139,46 @@ install_syn_fix() {
 
     ufw allow 22/tcp
     ufw allow "$port"/tcp
-
     ufw --force enable
+    ufw reload
 
-    # Добавляем наши правила в /etc/ufw/before.rules (если их там ещё нет)
-    if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-        cp /etc/ufw/before.rules /etc/ufw/before.rules.bak.$(date +%s)
-        sed -i "/COMMIT/ i\
-# MTProxy SYN FIX by MEKO (mtpr_syn_fix)\n\
--A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT\n\
--A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" /etc/ufw/before.rules
+    iptables -I ufw-before-input 1 \
+    -p tcp --dport "$port" --syn \
+    -m tcp --tcp-flags SYN SYN \
+    -m length --length 64 \
+    -m ttl --ttl-lt 65 \
+    -m hashlimit \
+    --hashlimit-name ios_"$port" \
+    --hashlimit-mode srcip \
+    --hashlimit-upto 15/second \
+    --hashlimit-burst 30 \
+    --hashlimit-htable-expire 60000 \
+    --hashlimit-htable-size 32768 \
+    -j ACCEPT
 
-        if ! grep -q 'mtpr_syn_fix' /etc/ufw/before.rules; then
-            log_info "COMMIT не найден, добавляем в конец before.rules"
-            echo -e "\n# MTProxy SYN FIX by MEKO (mtpr_syn_fix)" >> /etc/ufw/before.rules
-            echo "-A ufw-before-input -p tcp --dport $port --syn -m hashlimit --hashlimit-name mtproto_$port --hashlimit-mode srcip --hashlimit-upto 54/minute --hashlimit-burst 1 --hashlimit-htable-expire 60000 --hashlimit-htable-size 32768 -m comment --comment \"mtpr_syn_fix\" -j ACCEPT" >> /etc/ufw/before.rules
-            echo "-A ufw-before-input -p tcp --dport $port --syn -j REJECT --reject-with tcp-reset" >> /etc/ufw/before.rules
-        fi
-    else
-        log_info "Наши правила уже есть в before.rules"
-    fi
+    iptables -I ufw-before-input 2 \
+    -p tcp --dport "$port" --syn \
+    -m tcp --tcp-flags SYN SYN \
+    -m length --length 64 \
+    -m ttl --ttl-lt 65 \
+    -j REJECT --reject-with tcp-reset
+
+    iptables -I ufw-before-input 3 \
+    -p tcp --dport "$port" --syn \
+    -m hashlimit \
+    --hashlimit-name mtproto_"$port" \
+    --hashlimit-mode srcip \
+    --hashlimit-upto 54/minute \
+    --hashlimit-burst 1 \
+    --hashlimit-htable-expire 60000 \
+    --hashlimit-htable-size 32768 \
+    -j ACCEPT
+
+    iptables -I ufw-before-input 4 \
+    -p tcp --dport "$port" --syn \
+    -j REJECT --reject-with tcp-reset
 
     save_port "$port"
-    ufw reload
 
     log_success "SYN FIX успешно Установлен на порт $port"
 }
@@ -174,9 +217,25 @@ remove_syn_fix() {
     log_success "Все правила с tcp и syn удалены"
 }
 
-# ── Пункт 2: Optimization (пока ничего не делает) ──────────
+# ── Пункт 2: Отключение MSS ────────────────────────────────
 apply_optimization() {
-    log_info "Оптимизация пока не реализована"
+    if is_mss_enabled; then
+        echo ""
+        log_info "Обнаружены активные строки с MSS в /etc/telemt/telemt.toml"
+        echo -en "  ${BOLD}Отключить MSS? [Y/n]:${NC} "
+        local confirm
+        read -r confirm
+        if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+            disable_mss
+        else
+            log_info "Отмена"
+        fi
+    else
+        echo ""
+        log_info "MSS уже отключен или отсутствует в конфиге"
+        echo -e "  ${GRAY}Нажмите любую клавишу для возврата в меню...${NC}"
+        read -rsn1
+    fi
 }
 
 # ── Очистка экрана и шапка ──────────────────────────────────
@@ -187,7 +246,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}Простой менеджер SYN FIX${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.1${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -196,9 +255,9 @@ show_header() {
         if is_our_syn_fix_installed; then
             local port_info=$(get_saved_port)
             if [ -n "$port_info" ]; then
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC} (порт $port_info)"
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC} (порт $port_info)"
             else
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен (MEKO)${NC}"
+                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
             fi
         else
             # Любой другой SYN фикс (не наш)
@@ -208,7 +267,7 @@ show_header() {
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
     fi
 
-    # Telemt — теперь с цветом: зелёным если установлен, красным если нет
+    # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_info=""
         local configs=(
@@ -232,6 +291,13 @@ show_header() {
         else
             echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
         fi
+        
+        # Статус MSS
+        if is_mss_enabled; then
+            echo -e "  ${BOLD}MSS:${NC} ${RED}включен${NC}"
+        else
+            echo -e "  ${BOLD}MSS:${NC} ${GREEN}отключен${NC}"
+        fi
     else
         echo -e "  ${BOLD}Telemt:${NC} ${RED}не обнаружен${NC}"
     fi
@@ -250,8 +316,15 @@ main_menu() {
             local item1="${GREEN}Install SYN FIX${NC}"
         fi
 
+        # Проверяем статус MSS для пункта 2
+        if is_mss_enabled; then
+            local item2="${CYAN}Отключить MSS${NC}"
+        else
+            local item2="${GRAY}Отключить MSS (уже отключен)${NC}"
+        fi
+
         echo -e "  ${CYAN}[1]${NC}  $item1"
-        echo -e "  ${CYAN}[2]${NC}  Optimization (пока ничего не делает)"
+        echo -e "  ${CYAN}[2]${NC}  $item2"
         echo -e "  ${CYAN}[0]${NC}  Выход"
         echo ""
         echo -en "  ${BOLD}Выбор:${NC} "
@@ -266,7 +339,6 @@ main_menu() {
                     echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                     local confirm
                     read -r confirm
-                    # Пустой ввод (Enter) считается как Yes
                     if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
                         remove_syn_fix
                     else
@@ -280,9 +352,13 @@ main_menu() {
                 ;;
             2)
                 echo ""
-                apply_optimization
-                echo ""
-                read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+                if is_mss_enabled; then
+                    apply_optimization
+                else
+                    log_info "MSS уже отключен"
+                    echo ""
+                    read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+                fi
                 ;;
             0|q|Q)
                 echo ""
