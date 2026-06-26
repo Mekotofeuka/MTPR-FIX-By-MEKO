@@ -1,30 +1,6 @@
 #!/bin/bash
 set -eo pipefail
 
-# ── Файл для сохранения пути к конфигу ──────────────────────
-CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
-
-# ── Проверяем, сохранён ли путь к конфигу ──────────────────
-if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
-    DEFAULT_CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
-else
-    DEFAULT_CONFIG_TELEMT="/etc/telemt/telemt.toml"
-    echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter): "
-    read -r CONFIG_TELEMT_INPUT
-
-    if [ -z "$CONFIG_TELEMT_INPUT" ]; then
-        CONFIG_TELEMT_INPUT="$DEFAULT_CONFIG_TELEMT"
-    fi
-
-    DEFAULT_CONFIG_TELEMT="$CONFIG_TELEMT_INPUT"
-
-    # ── Сохраняем путь ──────────────────────────────────────
-    mkdir -p /opt/mtpr-simple
-    echo "$DEFAULT_CONFIG_TELEMT" > "$CONFIG_PATH_FILE"
-fi
-
-CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
-
 # ── Цвета ─────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -49,6 +25,44 @@ check_root() {
         exit 1
     fi
 }
+
+check_root
+
+# ── Файл для сохранения пути к конфигу ──────────────────────
+CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
+
+# ── Проверяем, сохранён ли путь к конфигу ──────────────────
+if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
+    DEFAULT_CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
+else
+    DEFAULT_CONFIG_TELEMT="/etc/telemt/telemt.toml"
+    echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter): "
+    read -r CONFIG_TELEMT_INPUT
+
+    if [ -z "$CONFIG_TELEMT_INPUT" ]; then
+        CONFIG_TELEMT_INPUT="$DEFAULT_CONFIG_TELEMT"
+    fi
+
+    DEFAULT_CONFIG_TELEMT="$CONFIG_TELEMT_INPUT"
+
+    # ── Проверяем, что указанный файл конфига действительно существует ──
+    if [ ! -f "$DEFAULT_CONFIG_TELEMT" ]; then
+        log_warning "Файл $DEFAULT_CONFIG_TELEMT не найден."
+        echo -en "  ${BOLD}Сохранить этот путь всё равно? [y/N]:${NC} "
+        confirm_path=""
+        read -r confirm_path
+        if [[ ! "$confirm_path" =~ ^[yY]$ ]]; then
+            log_error "Путь к конфигу не подтверждён, выход."
+            exit 1
+        fi
+    fi
+
+    # ── Сохраняем путь ──────────────────────────────────────
+    mkdir -p /opt/mtpr-simple
+    echo "$DEFAULT_CONFIG_TELEMT" >"$CONFIG_PATH_FILE"
+fi
+
+CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
 
 # ── Файл для хранения порта ─────────────────────────────────
 PORT_FILE="/opt/mtpr-simple/port"
@@ -112,24 +126,6 @@ is_syn_fix_installed() {
 # ── Для обратной совместимости с остальным кодом меню ──────
 is_our_syn_fix_installed() {
     is_syn_fix_installed
-}
-
-# ── Определение Telemt ──────────────────────────────────────
-detect_telemt() {
-    if pgrep -x telemt >/dev/null 2>&1; then
-        if [ -f "$CONFIG_TELEMT" ]; then
-            local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-            if [[ "$port" =~ ^[0-9]+$ ]]; then
-                echo "Установлен (порт $port)"
-                return 0
-            fi
-        fi
-        echo "Установлен (порт не определён)"
-        return 0
-    else
-        echo "не обнаружен"
-        return 1
-    fi
 }
 
 # ── ПРОВЕРКА НАЛИЧИЯ MSS В КОНФИГЕ TELEMT ──────────────────
@@ -327,6 +323,11 @@ apply_basic_optimization() {
     echo ""
     log_info "Выполнение базовой оптимизации системы и Telemt..."
 
+    if [ ! -f "$CONFIG_TELEMT" ]; then
+        log_error "Файл конфига $CONFIG_TELEMT не найден, базовая оптимизация Telemt-параметров пропущена"
+        return 1
+    fi
+
     if [ ! -f /etc/sysctl.conf ]; then
         touch /etc/sysctl.conf
         chmod 644 /etc/sysctl.conf
@@ -348,7 +349,7 @@ EOF
 
     # Функция применения sysctl
     apply_sysctl() {
-        cat > /etc/sysctl.d/99-custom.conf << EOF
+        cat >/etc/sysctl.d/99-custom.conf <<EOF
 net.ipv4.tcp_fastopen=3
 net.core.somaxconn=65535
 net.ipv4.tcp_max_syn_backlog=65535
@@ -361,7 +362,7 @@ net.ipv4.tcp_keepalive_intvl=15
 net.ipv4.tcp_keepalive_probes=3
 EOF
 
-        sysctl --system
+        sysctl --system 2>/dev/null || log_info "sysctl --system выполнен без изменений"
     }
 
     # ★★★★★ ВЫЗЫВАЕМ ФУНКЦИЮ ★★★★★
@@ -544,7 +545,7 @@ main_menu() {
         1)
             echo ""
             if is_syn_fix_installed; then
-                log_info "Обнаружены правила с tcp и syn. Удалить их все?"
+                log_info "Обнаружена установленная цепочка SYN FIX ($SYNFIX_CHAIN). Удалить её?"
                 echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                 local confirm
                 read -r confirm
@@ -594,5 +595,4 @@ main_menu() {
 }
 
 # ── Запуск ────────────────────────────────────────────────────
-check_root
 main_menu
