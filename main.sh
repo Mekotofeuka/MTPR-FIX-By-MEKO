@@ -1,13 +1,31 @@
 #!/bin/bash
 set -eo pipefail
-DEFAULT_CONFIG_TELEMT="/etc/telemt/config.toml"
 
-echo -en "Укажите путь к конфигу Telemt [${DEFAULT_CONFIG_TELEMT}]: "
-read -r CONFIG_TELEMT
+# ── Файл для сохранения пути к конфигу ──────────────────────
+CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
 
-if [ -z "$CONFIG_TELEMT" ]; then
-    CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
+# ── Проверяем, сохранён ли путь к конфигу ──────────────────
+if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
+    DEFAULT_CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
+    echo -e "  ${GREEN}[✓]${NC} Используем сохранённый путь к конфигу: ${CYAN}$DEFAULT_CONFIG_TELEMT${NC}"
+else
+    DEFAULT_CONFIG_TELEMT="/etc/telemt/config.toml"
+    echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter): "
+    read -r CONFIG_TELEMT_INPUT
+
+    if [ -z "$CONFIG_TELEMT_INPUT" ]; then
+        CONFIG_TELEMT_INPUT="$DEFAULT_CONFIG_TELEMT"
+    fi
+
+    DEFAULT_CONFIG_TELEMT="$CONFIG_TELEMT_INPUT"
+
+    # ── Сохраняем путь ──────────────────────────────────────
+    mkdir -p /opt/mtpr-simple
+    echo "$DEFAULT_CONFIG_TELEMT" > "$CONFIG_PATH_FILE"
+    echo -e "  ${GREEN}[✓]${NC} Путь сохранён в $CONFIG_PATH_FILE"
 fi
+
+CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
 
 # ── Цвета ─────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -121,7 +139,7 @@ detect_telemt() {
 
 # ── ПРОВЕРКА НАЛИЧИЯ MSS В КОНФИГЕ TELEMT ──────────────────
 is_mss_enabled() {
-    local config==$CONFIG_TELEMT
+    local config=$CONFIG_TELEMT
     if [ -f "$config" ]; then
         if grep -qi 'mss' "$config" | grep -v '^#' | grep -q .; then
             return 0
@@ -385,7 +403,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.71${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.72${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
