@@ -435,10 +435,22 @@ clear_screen() {
     clear 2>/dev/null || printf '\033[2J\033[H'
 }
 
+# ── Функция получения количества уникальных IP ─────────────
+get_online_count() {
+    local port="443"
+    if [ -f "$CONFIG_TELEMT" ]; then
+        local config_port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        if [[ "$config_port" =~ ^[0-9]+$ ]]; then
+            port="$config_port"
+        fi
+    fi
+    ss -tnp 2>/dev/null | grep ":${port}" | grep -v '0.0.0.0' | awk '{print $5}' | cut -d: -f1 | sort -u | wc -l | tr -d ' '
+}
+
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.76${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.77${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -469,16 +481,23 @@ show_header() {
 
     # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
+        local port_display=""
         if [ -f "$CONFIG_TELEMT" ]; then
             local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
             if [[ "$port" =~ ^[0-9]+$ ]]; then
-                echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт $port)"
+                port_display=" (порт $port)"
             else
-                echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
+                port_display=" (порт не определён)"
             fi
         else
-            echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
+            port_display=" (порт не определён)"
         fi
+
+        # Получаем количество уникальных IP
+        local online_count=$(get_online_count)
+
+        echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC}${port_display}"
+        echo -e "  ${BOLD}Подключено к прокси:${NC} ${CYAN}$online_count${NC} человек"
 
         # Статус MSS
         if is_mss_enabled; then
