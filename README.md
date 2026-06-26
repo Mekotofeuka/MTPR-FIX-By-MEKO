@@ -14,7 +14,7 @@
 
 # Быстрый старт:
 
-**Внимание, данный скрипт платный, цена: 1 🌟 на репозиторий**
+**Внимание, данный скрипт платный, цена: 1 ⭐ на репозиторий**
 1. **Установить стандартный Telemt** версии 3.4.18 (версия новее работает нестабильно, появляются реконнекты и медиа могут грузить хуже.) Также **альтернативой** вы можете поставить "**MTPROTO.zig**", но тогда при установке необходимо указать --no-dpi, например sudo mtbuddy install --port 443 --domain rutube.ru --no-tcpmss --yes
 2. Установить/обновить наш скрипт:
 ```Bash
@@ -67,7 +67,7 @@ mekopr
 Важно также сказать, что все тесты проводились на моделях айфона 11 и выше, а также без сторонних надстроек - хапрокси, амнезия,даблхоп/каскад и тд., поэтому с какими-либо изменениями оригинального прокси может не работать, дайте нам знать по поводу возникших проблем, если есть способ это исправить - сообщите нам, попробуем что-то с этим сделать. Если же вы нашли решение сами - аналогично сообщите нам ;)
 
 
-## ☕ Поддержать проект
+## ⭐ Поддержать проект
 
 **MEKO fix** — создан в свободное время для сообщества.  
 Ваша поддержка поможет проводить дальнейшие тесты;)
@@ -86,8 +86,17 @@ mekopr
 [<img width="300" height="300" alt="MEKO bot" src="https://github.com/user-attachments/assets/8db41a95-79f2-40d6-9777-50b6ffb6fa48" />](https://t.me/projectmeko_bot)
 
 
+<a href="https://star-history.com/#Mekotofeuka/MTPROTO_FIX_By_MEKO&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Mekotofeuka/MTPROTO_FIX_By_MEKO&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Mekotofeuka/MTPROTO_FIX_By_MEKO&type=Date" />
+   <img alt="Stars History" src="https://api.star-history.com/svg?repos=Mekotofeuka/MTPROTO_FIX_By_MEKO&type=Date" />
+ </picture>
+</a>
+
 
 
 ## Отдельное спасибо за вклад в разработку:
+[![Contributors](https://contrib.rocks/image?repo=Mekotofeuka/MTPROTO_FIX_By_MEKO)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/graphs/contributors)
 - [@CryZFix](https://github.com/CryZFix/)
 - [@Bxhost](https://github.com/bxhost)
