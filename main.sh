@@ -7,7 +7,6 @@ CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
 # ── Проверяем, сохранён ли путь к конфигу ──────────────────
 if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
     DEFAULT_CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
-    echo -e "  ${GREEN}[✓]${NC} Используем сохранённый путь к конфигу: ${CYAN}$DEFAULT_CONFIG_TELEMT${NC}"
 else
     DEFAULT_CONFIG_TELEMT="/etc/telemt/config.toml"
     echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter): "
@@ -22,7 +21,6 @@ else
     # ── Сохраняем путь ──────────────────────────────────────
     mkdir -p /opt/mtpr-simple
     echo "$DEFAULT_CONFIG_TELEMT" > "$CONFIG_PATH_FILE"
-    echo -e "  ${GREEN}[✓]${NC} Путь сохранён в $CONFIG_PATH_FILE"
 fi
 
 CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
@@ -119,16 +117,13 @@ is_our_syn_fix_installed() {
 # ── Определение Telemt ──────────────────────────────────────
 detect_telemt() {
     if pgrep -x telemt >/dev/null 2>&1; then
-        local configs=$CONFIG_TELEMT
-        for cfg in "${configs[@]}"; do
-            if [ -f "$cfg" ]; then
-                local port=$(grep -E '^port[[:space:]]*=' "$cfg" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-                if [[ "$port" =~ ^[0-9]+$ ]]; then
-                    echo "Установлен (порт $port)"
-                    return 0
-                fi
+        if [ -f "$CONFIG_TELEMT" ]; then
+            local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+            if [[ "$port" =~ ^[0-9]+$ ]]; then
+                echo "Установлен (порт $port)"
+                return 0
             fi
-        done
+        fi
         echo "Установлен (порт не определён)"
         return 0
     else
@@ -139,7 +134,7 @@ detect_telemt() {
 
 # ── ПРОВЕРКА НАЛИЧИЯ MSS В КОНФИГЕ TELEMT ──────────────────
 is_mss_enabled() {
-    local config=$CONFIG_TELEMT
+    local config="$CONFIG_TELEMT"
     if [ -f "$config" ]; then
         if grep -qi 'mss' "$config" | grep -v '^#' | grep -q .; then
             return 0
@@ -150,7 +145,7 @@ is_mss_enabled() {
 
 # ── ОТКЛЮЧЕНИЕ MSS (закомментирование строк с mss) ────────
 disable_mss() {
-    local config=$CONFIG_TELEMT
+    local config="$CONFIG_TELEMT"
     if [ ! -f "$config" ]; then
         log_error "Файл $config не найден"
         return 1
@@ -375,18 +370,18 @@ EOF
     systemctl stop telemt
 
     # Настройка max_connections
-    if grep -q '^max_connections *=.*' $CONFIG_TELEMT; then
-        if ! grep -q '^max_connections *= *16384' $CONFIG_TELEMT; then
-            sed -i 's/^max_connections *= *.*/max_connections = 16384/' $CONFIG_TELEMT
+    if grep -q '^max_connections *=.*' "$CONFIG_TELEMT"; then
+        if ! grep -q '^max_connections *= *16384' "$CONFIG_TELEMT"; then
+            sed -i 's/^max_connections *= *.*/max_connections = 16384/' "$CONFIG_TELEMT"
         fi
     else
-        grep -q '\[server\]' $CONFIG_TELEMT && sed -i '/\[server\]/a max_connections = 16384' $CONFIG_TELEMT
+        grep -q '\[server\]' "$CONFIG_TELEMT" && sed -i '/\[server\]/a max_connections = 16384' "$CONFIG_TELEMT"
     fi
 
     # Настройка client_handshake
-    if grep -q '^client_handshake *=.*' $CONFIG_TELEMT; then
-        if ! grep -q '^client_handshake *= *15' $CONFIG_TELEMT; then
-            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' $CONFIG_TELEMT
+    if grep -q '^client_handshake *=.*' "$CONFIG_TELEMT"; then
+        if ! grep -q '^client_handshake *= *15' "$CONFIG_TELEMT"; then
+            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' "$CONFIG_TELEMT"
         fi
     fi
 
@@ -403,7 +398,7 @@ clear_screen() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.72${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.74${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -426,19 +421,13 @@ show_header() {
 
     # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
-        local port_info=""
-        local configs=$CONFIG_TELEMT
-        for cfg in "${configs[@]}"; do
-            if [ -f "$cfg" ]; then
-                local port=$(grep -E '^port[[:space:]]*=' "$cfg" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-                if [[ "$port" =~ ^[0-9]+$ ]]; then
-                    port_info=" (порт $port)"
-                    break
-                fi
+        if [ -f "$CONFIG_TELEMT" ]; then
+            local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+            if [[ "$port" =~ ^[0-9]+$ ]]; then
+                echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт $port)"
+            else
+                echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
             fi
-        done
-        if [ -n "$port_info" ]; then
-            echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC}$port_info"
         else
             echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC} (порт не определён)"
         fi
