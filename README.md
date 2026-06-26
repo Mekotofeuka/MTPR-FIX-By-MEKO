@@ -57,3 +57,4 @@ mekopr
 
 ## Отдельное спасибо за вклад в разработку:
 - [@CryZFix](https://github.com/CryZFix/)
+- [@Bxhost](https://github.com/bxhost)
