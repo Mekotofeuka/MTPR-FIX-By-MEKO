@@ -1,6 +1,6 @@
 # MTPROTO FIX By MEKO 
 
-[![Latest Release](https://img.shields.io/github/v/release/Mekotofeuka/MTPR-FIX-By-MEKO?color=neon)](https://github.com/Mekotofeuka/MTPR-FIX-By-MEKO/releases/latest) [![Stars](https://img.shields.io/github/stars/Mekotofeuka/MTPR-FIX-By-MEKO?style=social)](https://github.com/Mekotofeuka/MTPR-FIX-By-MEKO/stargazers) [![Forks](https://img.shields.io/github/forks/Mekotofeuka/MTPR-FIX-By-MEKO?style=social)](https://github.com/Mekotofeuka/MTPR-FIX-By-MEKO/network/members)
+[![Latest Release](https://img.shields.io/github/v/release/Mekotofeuka/MTPROTO_FIX_By_MEKO?color=neon)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/releases/latest) [![Stars](https://img.shields.io/github/stars/Mekotofeuka/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/Mekotofeuka/MTPROTO_FIX_By_MEKO/stargazers) [![Forks](https://img.shields.io/github/forks/Mekotofeuka/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/Mekotofeuka/MTPROTO_FIX_By_MEKO/network/members)
 
 Для чего нужен метод:
 **Помогает решить проблему**, которая появилась с 4 июня, когда telegram клиент не может подключиться к mtproto прокси-серверу. 
@@ -18,7 +18,7 @@
 1. **Установить стандартный Telemt** версии 3.4.18 (версия новее работает нестабильно, появляются реконнекты и медиа могут грузить хуже.) Также **альтернативой** вы можете поставить "**MTPROTO.zig**", но тогда при установке необходимо указать --no-dpi, например sudo mtbuddy install --port 443 --domain rutube.ru --no-tcpmss --yes
 2. Установить/обновить наш скрипт:
 ```Bash
-curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPR-FIX-By-MEKO/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
 ```
 3. Выполнить удаление старого SYN limit, (если он уже стоял на сервере ранее) нажав 1. Выполнить установку нашего фикса снова нажав 1.
 4. Отключить MSS нажав 2 (если он уже был добавлен в конфиг телемт на сервер ранее)
