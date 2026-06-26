@@ -132,7 +132,7 @@ is_our_syn_fix_installed() {
 is_mss_enabled() {
     local config="$CONFIG_TELEMT"
     if [ -f "$config" ]; then
-        if grep -qE '^[[:space:]]*client_mss[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
+        if grep -E 'client_mss[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
             return 0
         fi
     fi
@@ -142,7 +142,7 @@ is_mss_enabled() {
 is_synlimit_enabled() {
     local config="$CONFIG_TELEMT"
     if [ -f "$config" ]; then
-        if grep -qE '^[[:space:]]*synlimit[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
+        if grep -E 'synlimit[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
             return 0
         fi
     fi
@@ -168,14 +168,14 @@ disable_bad_options() {
     local changed=0
 
     # Отключаем MSS
-    if grep -qE '^[[:space:]]*client_mss[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
-        sed -i 's/^[[:space:]]*\(client_mss[[:space:]]*=\)/#\1/i' "$config"
+    if grep -E 'client_mss[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
+        sed -i '/client_mss[[:space:]]*=/s/^/#/' "$config"
         changed=1
     fi
 
     # Отключаем synlimit
-    if grep -qE '^[[:space:]]*synlimit[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
-        sed -i 's/^[[:space:]]*\(synlimit[[:space:]]*=\)/#\1/i' "$config"
+    if grep -E 'synlimit[[:space:]]*=' "$config" | grep -v '^#' | grep -q .; then
+        sed -i '/synlimit[[:space:]]*=/s/^/#/' "$config"
         changed=1
     fi
 
