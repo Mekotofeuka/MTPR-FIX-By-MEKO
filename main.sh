@@ -36,33 +36,54 @@ if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
     DEFAULT_CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
 else
     DEFAULT_CONFIG_TELEMT="/etc/telemt/telemt.toml"
-    echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter): "
+    echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${DEFAULT_CONFIG_TELEMT}] если не меняли - нажмите Enter, или [N/n] для пропуска): "
     read -r CONFIG_TELEMT_INPUT
 
-    if [ -z "$CONFIG_TELEMT_INPUT" ]; then
-        CONFIG_TELEMT_INPUT="$DEFAULT_CONFIG_TELEMT"
-    fi
-
-    DEFAULT_CONFIG_TELEMT="$CONFIG_TELEMT_INPUT"
-
-    # ── Проверяем, что указанный файл конфига действительно существует ──
-    if [ ! -f "$DEFAULT_CONFIG_TELEMT" ]; then
-        log_warning "Файл $DEFAULT_CONFIG_TELEMT не найден."
-        echo -en "  ${BOLD}Сохранить этот путь всё равно? [y/N]:${NC} "
-        confirm_path=""
-        read -r confirm_path
-        if [[ ! "$confirm_path" =~ ^[yY]$ ]]; then
-            log_error "Путь к конфигу не подтверждён, выход."
-            exit 1
+    # Проверяем, хочет ли пользователь пропустить ввод конфига
+    if [[ "$CONFIG_TELEMT_INPUT" =~ ^[Nn]$ ]]; then
+        # Пользователь выбрал N - выходим без сохранения пути
+        CONFIG_TELEMT=""
+        log_info "Пропускаем указание пути к конфигу Telemt."
+        # Создаём пустой файл, чтобы не спрашивать при следующем запуске
+        mkdir -p /opt/mtpr-simple
+        echo "skip" >"$CONFIG_PATH_FILE"
+    else
+        if [ -z "$CONFIG_TELEMT_INPUT" ]; then
+            CONFIG_TELEMT_INPUT="$DEFAULT_CONFIG_TELEMT"
         fi
-    fi
 
-    # ── Сохраняем путь ──────────────────────────────────────
-    mkdir -p /opt/mtpr-simple
-    echo "$DEFAULT_CONFIG_TELEMT" >"$CONFIG_PATH_FILE"
+        DEFAULT_CONFIG_TELEMT="$CONFIG_TELEMT_INPUT"
+
+        # ── Проверяем, что указанный файл конфига действительно существует ──
+        if [ ! -f "$DEFAULT_CONFIG_TELEMT" ]; then
+            log_warning "Файл $DEFAULT_CONFIG_TELEMT не найден."
+            echo -en "  ${BOLD}Сохранить этот путь всё равно? [y/N]:${NC} "
+            confirm_path=""
+            read -r confirm_path
+            if [[ ! "$confirm_path" =~ ^[yY]$ ]]; then
+                log_error "Путь к конфигу не подтверждён, выход."
+                exit 1
+            fi
+        fi
+
+        # ── Сохраняем путь ──────────────────────────────────────
+        mkdir -p /opt/mtpr-simple
+        echo "$DEFAULT_CONFIG_TELEMT" >"$CONFIG_PATH_FILE"
+        CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
+    fi
+else
+    # Если файл существует и содержит "skip", значит пользователь ранее отказался от указания пути
+    if [ -f "$CONFIG_PATH_FILE" ] && [ "$(cat "$CONFIG_PATH_FILE")" = "skip" ]; then
+        CONFIG_TELEMT=""
+    else
+        CONFIG_TELEMT=$(cat "$CONFIG_PATH_FILE")
+    fi
 fi
 
-CONFIG_TELEMT="$DEFAULT_CONFIG_TELEMT"
+# Если CONFIG_TELEMT пуст или равен "skip", устанавливаем его в пустую строку для дальнейшей работы
+if [ -z "$CONFIG_TELEMT" ] || [ "$CONFIG_TELEMT" = "skip" ]; then
+    CONFIG_TELEMT=""
+fi
 
 # ── Файл для хранения порта ─────────────────────────────────
 PORT_FILE="/opt/mtpr-simple/port"
@@ -479,9 +500,24 @@ apply_basic_optimization() {
     echo ""
     log_info "Выполнение базовой оптимизации системы и Telemt..."
 
-    if [ ! -f "$CONFIG_TELEMT" ]; then
-        log_error "Файл конфига $CONFIG_TELEMT не найден, базовая оптимизация Telemt-параметров пропущена"
-        return 1
+    if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
+        log_warning "Файл конфига Telemt не указан или не найден, пропускаем оптимизацию параметров Telemt"
+    else
+        # Настройка max_connections
+        if grep -q '^max_connections *=.*' "$CONFIG_TELEMT"; then
+            if ! grep -q '^max_connections *= *16384' "$CONFIG_TELEMT"; then
+                sed -i 's/^max_connections *= *.*/max_connections = 16384/' "$CONFIG_TELEMT"
+            fi
+        else
+            grep -q '\[server\]' "$CONFIG_TELEMT" && sed -i '/\[server\]/a max_connections = 16384' "$CONFIG_TELEMT"
+        fi
+
+        # Настройка client_handshake
+        if grep -q '^client_handshake *=.*' "$CONFIG_TELEMT"; then
+            if ! grep -q '^client_handshake *= *15' "$CONFIG_TELEMT"; then
+                sed -i 's/^client_handshake *= *.*/client_handshake = 15/' "$CONFIG_TELEMT"
+            fi
+        fi
     fi
 
     if [ ! -f /etc/sysctl.conf ]; then
@@ -524,25 +560,8 @@ EOF
     # ★★★★★ ВЫЗЫВАЕМ ФУНКЦИЮ ★★★★★
     apply_sysctl
 
-    systemctl stop telemt
-
-    # Настройка max_connections
-    if grep -q '^max_connections *=.*' "$CONFIG_TELEMT"; then
-        if ! grep -q '^max_connections *= *16384' "$CONFIG_TELEMT"; then
-            sed -i 's/^max_connections *= *.*/max_connections = 16384/' "$CONFIG_TELEMT"
-        fi
-    else
-        grep -q '\[server\]' "$CONFIG_TELEMT" && sed -i '/\[server\]/a max_connections = 16384' "$CONFIG_TELEMT"
-    fi
-
-    # Настройка client_handshake
-    if grep -q '^client_handshake *=.*' "$CONFIG_TELEMT"; then
-        if ! grep -q '^client_handshake *= *15' "$CONFIG_TELEMT"; then
-            sed -i 's/^client_handshake *= *.*/client_handshake = 15/' "$CONFIG_TELEMT"
-        fi
-    fi
-
-    systemctl restart telemt
+    systemctl stop telemt 2>/dev/null || true
+    systemctl restart telemt 2>/dev/null || true
 
     log_success "Базовая оптимизация выполнена"
 }
@@ -616,12 +635,12 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.8${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.81${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
     # Обновляем порт из конфига при каждом показе меню
-    if pgrep -x telemt >/dev/null 2>&1 && [ -f "$CONFIG_TELEMT" ]; then
+    if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ] && pgrep -x telemt >/dev/null 2>&1; then
         local current_port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
         if [[ "$current_port" =~ ^[0-9]+$ ]] && [ "$current_port" != "$(get_saved_port)" ]; then
             save_port "$current_port"
@@ -641,7 +660,7 @@ show_header() {
     # Telemt
     if pgrep -x telemt >/dev/null 2>&1; then
         local port_display=""
-        if [ -f "$CONFIG_TELEMT" ]; then
+        if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
             local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
             if [[ "$port" =~ ^[0-9]+$ ]]; then
                 port_display=" (порт $port)"
