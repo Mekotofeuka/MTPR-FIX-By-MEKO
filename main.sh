@@ -118,14 +118,32 @@ save_port() {
 # ── Название кастомной цепочки iptables ─────────────────────
 SYNFIX_CHAIN="MTPR_SYNFIX"
 
-# ── ПРОВЕРКА НАЛИЧИЯ НАШЕЙ ЦЕПОЧКИ SYN FIX ──────────────────
-is_syn_fix_installed() {
+# ── ПРОВЕРКА НАЛИЧИЯ ЦЕПОЧКИ IPTABLES SYN FIX ────────────────
+is_syn_fix_chain_installed() {
     iptables -L "$SYNFIX_CHAIN" -n >/dev/null 2>&1
+}
+
+# ── ПРОВЕРКА СТАТУСА SYSTEMD СЕРВИСА SYN FIX ─────────────────
+is_syn_fix_service_running() {
+    systemctl is-active --quiet mtpr-synfix.service
+}
+
+# ── ПОЛУЧЕНИЕ СТАТУСА SYN FIX (для show_header) ────────────────
+get_synfix_status() {
+    if is_syn_fix_chain_installed; then
+        if is_syn_fix_service_running; then
+            echo "active"
+        else
+            echo "has_chain_only"
+        fi
+    else
+        echo "inactive"
+    fi
 }
 
 # ── Для обратной совместимости с остальным кодом меню ──────
 is_our_syn_fix_installed() {
-    is_syn_fix_installed
+    is_syn_fix_chain_installed
 }
 
 # ── ПРОВЕРКА НАЛИЧИЯ MSS И SYN_LIMIT В КОНФИГЕ TELEMT ──────
@@ -186,126 +204,137 @@ disable_bad_options() {
     fi
 }
 
-# ── Установка iptables-persistent (если отсутствует) ────────
-ensure_iptables_persistence() {
-    if dpkg -s iptables-persistent >/dev/null 2>&1; then
-        return 0
-    fi
-    log_info "Установка iptables-persistent для сохранения правил между перезагрузками..."
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-}
-
-# ── Сохранение текущих правил iptables на диск ──────────────
-persist_iptables_rules() {
-    mkdir -p /etc/iptables
-    if command -v netfilter-persistent >/dev/null 2>&1; then
-        netfilter-persistent save >/dev/null 2>&1
-    elif command -v iptables-save >/dev/null 2>&1; then
-        iptables-save >/etc/iptables/rules.v4
-    fi
-}
-
 # ── Установка SYN FIX ──────────────────────────────────────
 install_syn_fix() {
     local port
-    ssh_port=$(get_ssh_port)
-    echo ""
-    echo -en "  ${BOLD}Введите порт для SYN FIX (по умолчанию 443):${NC} "
-    read -r port
-    if [ -z "$port" ]; then
-        port="443"
+    local auto_install=false
+    local forced_port=""
+
+    # Проверяем аргумент -auto_install
+    if [[ "$1" == "-auto_install" ]]; then
+        auto_install=true
+        forced_port="$2"
+        log_info "Авто-установка SYN FIX"
     fi
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        log_error "Некорректный порт, используем 443"
-        port="443"
+
+    ssh_port=$(get_ssh_port)
+
+    # В авто-режиме берём порт из аргумента, иначе дефолтный
+    if [ "$auto_install" = true ]; then
+        if [[ "$forced_port" =~ ^[0-9]+$ ]]; then
+            port="$forced_port"
+            log_info "Используем порт, переданный аргументом: $port"
+        else
+            log_info "Файл с портом не найден, используем 443"
+            port="443"
+        fi
+    else
+        # Обычный интерактивный режим
+        echo ""
+        echo -en "  ${BOLD}Введите порт для SYN FIX (по умолчанию 443):${NC} "
+        read -r port
+        if [ -z "$port" ]; then
+            port="443"
+        fi
+        if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            log_error "Некорректный порт, используем 443"
+            port="443"
+        fi
     fi
 
     # ── ПОДТВЕРЖДЕНИЕ ПЕРЕД УСТАНОВКОЙ ──────────────────────
-    echo ""
-    log_warning "Будет выполнена установка SYN FIX на порт $port"
-    echo ""
-    echo -e "  ${BOLD}Что будет сделано:${NC}"
-    echo -e "  • Создана отдельная цепочка iptables ${CYAN}$SYNFIX_CHAIN${NC} для порта ${CYAN}$port${NC}"
-    echo -e "  • Добавлены ${CYAN}4 правила${NC} SYN-фильтрации в эту цепочку"
-    echo -e "  • Правила будут сохранены через ${CYAN}iptables-persistent${NC} (для применения после перезагрузки)"
-    echo -e "  • Вы сможете удалить данную настройку через меню скрипта."
-    echo ""
-    log_warning "${BOLD}ВНИМАНИЕ:${NC} Данная настройка изменит файрвол системы."
-    echo ""
-    echo -en "  ${BOLD}Продолжить установку? [y/N]:${NC} "
-    local confirm
-    read -r confirm
+    if [ "$auto_install" = false ]; then
+        echo ""
+        log_warning "Будет выполнена установка SYN FIX на порт $port"
+        echo ""
+        echo -e "  ${BOLD}Что будет сделано:${NC}"
+        echo -e "  • Создана отдельная цепочка iptables ${CYAN}$SYNFIX_CHAIN${NC} для порта ${CYAN}$port${NC}"
+        echo -e "  • Добавлены ${CYAN}4 правила${NC} SYN-фильтрации в эту цепочку"
+        echo -e "  • Вы сможете удалить данную настройку через меню скрипта."
+        echo ""
+        log_warning "${BOLD}ВНИМАНИЕ:${NC} Данная настройка изменит файрвол системы."
+        echo ""
+        echo -en "  ${BOLD}Продолжить установку? [y/N]:${NC} "
+        local confirm
+        read -r confirm
 
-    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
-        log_info "Установка отменена"
-        sleep 0.5
-        return 1
+        if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+            log_info "Установка отменена"
+            sleep 0.5
+            return 1
+        fi
     fi
 
     log_info "Установка SYN FIX на порт $port..."
-
-    ensure_iptables_persistence
-
-    # ── Гарантируем доступ по SSH, прежде чем менять политику фильтрации ──
-    if ! iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null; then
-        iptables -I INPUT 1 -p tcp --dport "$ssh_port" -j ACCEPT
-    fi
-
-    # ── Создаём (или очищаем) собственную цепочку ──────────
-    iptables -N "$SYNFIX_CHAIN" 2>/dev/null
-    iptables -F "$SYNFIX_CHAIN"
-
-    # ── Подключаем цепочку к INPUT, если ещё не подключена ──
-    if ! iptables -C INPUT -j "$SYNFIX_CHAIN" 2>/dev/null; then
-        iptables -I INPUT 2 -j "$SYNFIX_CHAIN"
-    fi
-
-    iptables -A "$SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m tcp --tcp-flags SYN SYN \
-        -m length --length 64 \
-        -m ttl --ttl-lt 65 \
-        -m hashlimit \
-        --hashlimit-name ios_"$port" \
-        --hashlimit-mode srcip \
-        --hashlimit-upto 15/second \
-        --hashlimit-burst 30 \
-        --hashlimit-htable-expire 60000 \
-        --hashlimit-htable-size 32768 \
-        -j ACCEPT
-
-    iptables -A "$SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m tcp --tcp-flags SYN SYN \
-        -m length --length 64 \
-        -m ttl --ttl-lt 65 \
-        -j REJECT --reject-with tcp-reset
-
-    iptables -A "$SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m hashlimit \
-        --hashlimit-name mtproto_"$port" \
-        --hashlimit-mode srcip \
-        --hashlimit-upto 54/minute \
-        --hashlimit-burst 1 \
-        --hashlimit-htable-expire 60000 \
-        --hashlimit-htable-size 32768 \
-        -j ACCEPT
-
-    iptables -A "$SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -j REJECT --reject-with tcp-reset
-
     save_port "$port"
-    persist_iptables_rules
+
+    # ── Генерируем и запускаем скрипт применения правил ─────────
+    generate_apply_script
+    generate_service_unit
+    systemctl daemon-reload
+    PORT="$port" /opt/mtpr-simple/apply-mtpr-synfix.sh
+    systemctl enable mtpr-synfix.service
+    systemctl restart mtpr-synfix.service
 
     log_success "SYN FIX успешно Установлен на порт $port"
+}
+
+# ── Удаление правил из файла iptables ──────────────────────
+remove_iptables_rules() {
+    local rules_file="/etc/iptables/rules.v4"
+    
+    if [ ! -f "$rules_file" ]; then
+        log_warning "Файл $rules_file не найден"
+        return 1
+    fi
+    
+    log_info "Проверка наличия наших правил в $rules_file..."
+    
+    # Проверяем, есть ли наша цепочка в файле
+    if ! grep -q "MTPR_SYNFIX" "$rules_file"; then
+        log_warning "Наши правила (MTPR_SYNFIX) не найдены в файле"
+        return 1
+    fi
+    
+    # Наши правила есть - запрашиваем подтверждение
+    echo ""
+    echo -e "  ${BOLD}Обнаружены наши правила SYN FIX в файле${NC}"
+    echo -e "  ${DIM}Что будет сделано:${NC}"
+    if grep -q "^COMMIT" "$rules_file" && grep -c "MTPR_SYNFIX" "$rules_file" | grep -q '^1$'; then
+        echo -e "  • Будет удалён весь файл (только наши правила)"
+    else
+        echo -e "  • Будут удалены только строки с цепочкой $SYNFIX_CHAIN"
+    fi
+    echo ""
+    log_warning "Это изменит конфигурацию iptables-persistent!"
+    echo ""
+    echo -en "  ${BOLD}Подтвердить удаление? [y/N]:${NC} "
+    local confirm
+    read -r confirm
+    
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+        log_info "Удаление отменено"
+        return 0
+    fi
+    
+    echo ""
+    
+    # Удаляем только наши правила (строки с MTPR_SYNFIX)
+    local temp_file=$(mktemp)
+    grep -v "MTPR_SYNFIX" "$rules_file" > "$temp_file"
+    mv "$temp_file" "$rules_file"
+    chmod 644 "$rules_file"
+    
+    log_success "Правила $SYNFIX_CHAIN удалены из $rules_file"
 }
 
 # ── Удаление SYN FIX (только нашей цепочки) ────────────────
 remove_syn_fix() {
     log_info "Удаление SYN FIX..."
+
+    # ── Останавливаем и отключаем systemd сервис ────────────────
+    systemctl stop mtpr-synfix.service 2>/dev/null || true
+    systemctl disable mtpr-synfix.service 2>/dev/null || true
 
     if iptables -C INPUT -j "$SYNFIX_CHAIN" 2>/dev/null; then
         iptables -D INPUT -j "$SYNFIX_CHAIN"
@@ -318,10 +347,110 @@ remove_syn_fix() {
         log_info "Цепочка $SYNFIX_CHAIN удалена"
     fi
 
-    persist_iptables_rules
     rm -f "$PORT_FILE"
 
+    # Удаляем systemd юнит файл
+    rm -f /etc/systemd/system/mtpr-synfix.service
+
+    # Перезагружаем менеджер служб
+    systemctl daemon-reload
+
     log_success "SYN FIX удалён"
+}
+
+# ── Перезапуск сервиса SYN FIX ─────────
+restart_syn_fix_service() {
+    log_info "Перезапуск сервиса mtpr-synfix.service..."
+    systemctl restart mtpr-synfix.service
+    log_success "Сервис успешно перезапущен"
+}
+
+# ── Генерация скрипта применения правил ──────────────────────────
+generate_apply_script() {
+    cat >/opt/mtpr-simple/apply-mtpr-synfix.sh <<'APPLY_SCRIPT_EOF'
+#!/bin/bash
+set -e
+
+PORT="${PORT:-$(cat /opt/mtpr-simple/port 2>/dev/null)}"
+
+if [ -z "$PORT" ]; then
+    echo "SYN FIX: Порт не указан, выход" >&2
+    exit 1
+fi
+
+CHAIN="MTPR_SYNFIX"
+
+SSH_PORT=$(sshd -T 2>/dev/null | grep '^port ' | awk '{print $2}' || echo 22)
+
+if ! iptables -C INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT 1 -p tcp --dport "$SSH_PORT" -j ACCEPT
+    echo "SSH-доступ (${SSH_PORT}) разрешён"
+fi
+
+iptables -t filter -N "$CHAIN" 2>/dev/null || true
+iptables -t filter -F "$CHAIN"
+
+if ! iptables -t filter -C INPUT -j "$CHAIN" 2>/dev/null; then
+    iptables -t filter -I INPUT 2 -j "$CHAIN"
+    echo "Цепочка $CHAIN подключена к INPUT"
+fi
+
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -m tcp --tcp-flags SYN SYN \
+    -m length --length 64 \
+    -m ttl --ttl-lt 65 \
+    -m hashlimit \
+    --hashlimit-name ios_"$PORT" \
+    --hashlimit-mode srcip \
+    --hashlimit-upto 15/second \
+    --hashlimit-burst 30 \
+    --hashlimit-htable-expire 60000 \
+    --hashlimit-htable-size 32768 \
+    -j ACCEPT
+
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -m tcp --tcp-flags SYN SYN \
+    -m length --length 64 \
+    -m ttl --ttl-lt 65 \
+    -j REJECT --reject-with tcp-reset
+
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -m hashlimit \
+    --hashlimit-name mtproto_"$PORT" \
+    --hashlimit-mode srcip \
+    --hashlimit-upto 54/minute \
+    --hashlimit-burst 1 \
+    --hashlimit-htable-expire 60000 \
+    --hashlimit-htable-size 32768 \
+    -j ACCEPT
+
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -j REJECT --reject-with tcp-reset
+
+APPLY_SCRIPT_EOF
+    chmod +x /opt/mtpr-simple/apply-mtpr-synfix.sh
+}
+
+# ── Генерация systemd юнита ────────────────────────────────────
+generate_service_unit() {
+    cat >/etc/systemd/system/mtpr-synfix.service <<'SERVICE_UNIT_EOF'
+[Unit]
+Description=MTProto SYN FIX rules for Telemt
+After=docker.service ufw.service network.target
+Wants=docker.service ufw.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/mtpr-simple/apply-mtpr-synfix.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_UNIT_EOF
+    if systemctl daemon-reload 2>/dev/null; then
+        log_info "Системный менеджер служб перезапущен"
+    fi
 }
 
 # ── Пункт 2: Отключение MSS и synlimit ─────────────────────
@@ -499,19 +628,12 @@ show_header() {
         fi
     fi
 
-    # Определяем статус SYN FIX
-    if is_syn_fix_installed; then
-        if is_our_syn_fix_installed; then
-            local port_info=$(get_saved_port)
-            if [ -n "$port_info" ]; then
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC} (порт $port_info)"
-            else
-                echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
-            fi
-        else
-            # Любой другой SYN фикс (не наш)
-            echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
-        fi
+    # Определяем статус SYN FIX (проверка статуса сервиса)
+    local synfix_status=$(get_synfix_status)
+    if [ "$synfix_status" = "active" ]; then
+        echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
+    elif [ "$synfix_status" = "has_chain_only" ]; then
+        echo -e "  ${BOLD}SYN FIX:${NC} ${YELLOW}Цепочка есть, сервис не запущен${NC}"
     else
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}Не установлен${NC}"
     fi
@@ -576,13 +698,36 @@ show_header() {
 
 # ── Главное меню ─────────────────────────────────────────────
 main_menu() {
-    while true; do
-        show_header
+    # Проверяем аргумент -auto_install
+    local auto_install=false
+    if [[ "$1" == "-auto_install" ]]; then
+        auto_install=true
+        local forced_port="$2"
+        echo -e "  ${BLUE}[i]${NC} Запуск в режиме авто-установки SYN FIX..."
+        install_syn_fix -auto_install "$forced_port"
+        echo ""
+        read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+    fi
 
-        if is_syn_fix_installed; then
-            local item1="${RED}Удалить SYN FIX${NC}"
-        else
+    while true; do
+        # Проверка наличия файла iptables с нашими правилами
+        local show_iptables_rules=false
+        if [ -f /etc/iptables/rules.v4 ]; then
+            if grep -q "MTPR_SYNFIX" /etc/iptables/rules.v4 2>/dev/null; then
+                show_iptables_rules=true
+            fi
+        fi
+        
+        show_header
+        echo ""
+
+        local synfix_status=$(get_synfix_status)
+        if [ "$synfix_status" = "inactive" ]; then
             local item1="${GREEN}Установить SYN FIX${NC}"
+        elif [ "$synfix_status" = "has_chain_only" ]; then
+            local item1="${CYAN}Перезапустить сервис${NC}"
+        else
+            local item1="${RED}Удалить SYN FIX${NC}"
         fi
 
         # Проверяем статус для пункта 2
@@ -596,6 +741,12 @@ main_menu() {
         echo -e "  ${CYAN}[2]${NC}  $item2"
         echo -e "  ${CYAN}[3]${NC}  ${GREEN}Выполнить базовую оптимизацию${NC}"
         echo -e "  ${CYAN}[4]${NC}  ${RED}Полное удаление MEKOpr${NC}"
+        echo -e "  ${CYAN}[5]${NC}  ${BLUE}Обновить фикс${NC}"
+        
+        if [ "$show_iptables_rules" = true ]; then
+            echo -e "  ${RED}[6]${NC}  Удалить правила iptables-persistent"
+        fi
+        
         echo -e "  ${CYAN}[0]${NC}  Выход"
         echo ""
         echo -en "  ${BOLD}Выбор:${NC} "
@@ -605,7 +756,23 @@ main_menu() {
         case "$choice" in
         1)
             echo ""
-            if is_syn_fix_installed; then
+            local synfix_status=$(get_synfix_status)
+
+            if [ "$synfix_status" = "inactive" ]; then
+                if ! install_syn_fix; then
+                    continue
+                fi
+            elif [ "$synfix_status" = "has_chain_only" ]; then
+                log_info "Цепочка SYN FIX найдена, но сервис не запущен. Перезапустить сервис?"
+                echo -en "  ${BOLD}Перезапустить? [Y/n]:${NC} "
+                local confirm
+                read -r confirm
+                if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+                    restart_syn_fix_service
+                else
+                    log_info "Отмена перезапуска"
+                fi
+            else
                 log_info "Обнаружена установленная цепочка SYN FIX ($SYNFIX_CHAIN). Удалить её?"
                 echo -en "  ${BOLD}Удалить? [Y/n]:${NC} "
                 local confirm
@@ -614,10 +781,6 @@ main_menu() {
                     remove_syn_fix
                 else
                     log_info "Отмена удаления"
-                fi
-            else
-                if ! install_syn_fix; then
-                    continue
                 fi
             fi
             echo ""
@@ -642,6 +805,16 @@ main_menu() {
         4)
             remove_mekopr
             ;;
+        5)
+            echo ""
+            update_script
+            ;;
+        6)
+            echo ""
+            remove_iptables_rules
+            echo ""
+            read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+            ;;
         0 | q | Q)
             echo ""
             log_info "Выход"
@@ -655,5 +828,49 @@ main_menu() {
     done
 }
 
+# ── Обновление скрипта ──────────────────────────────────────────
+update_script() {
+    local url="https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/main.sh"
+    local temp="/tmp/$(basename "$0").new.$$"
+    local saved_port=""
+
+    # ── Запоминаем текущий порт
+    if [ -f "$PORT_FILE" ] && [ -s "$PORT_FILE" ]; then
+        saved_port=$(cat "$PORT_FILE")
+    fi
+    if ! [[ "$saved_port" =~ ^[0-9]+$ ]]; then
+        saved_port="443"
+    fi
+
+    echo ""
+    echo -e "  ${YELLOW}[!]${NC} Удаляем текущую версию..."
+    remove_syn_fix
+    rm -f "$0"
+
+    echo ""
+    echo -e "  ${GREEN}[✓]${NC} Скачиваем новую версию..."
+    if curl -fsSL "$url" -o "$temp"; then
+        chmod +x "$temp"
+
+        if mv "$temp" "$0"; then
+            echo -e "  ${GREEN}[✓]${NC} Обновление успешно. Перезапускаемся..."
+            sleep 2
+            exec "$0" "$@" -auto_install "$saved_port"
+        else
+            echo -e "  ${RED}[✗]${NC} Не удалось перезаписать файл"
+            rm -f "$temp"
+            exit 1
+        fi
+    else
+        echo -e "  ${RED}[✗]${NC} Ошибка скачивания"
+        rm -f "$temp"
+        echo -e "  ${YELLOW}Продолжить запуск из исходного файла? [Y/n]:${NC} "
+        read -r confirm
+        if [[ "$confirm" =~ ^[nN]$ ]]; then
+            exit 1
+        fi
+    fi
+}
+
 # ── Запуск ────────────────────────────────────────────────────
-main_menu
+main_menu "$@"
