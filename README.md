@@ -5,8 +5,9 @@
 <img width="300" height="300" alt="Без имени-1" src="https://github.com/user-attachments/assets/8decca32-f96a-4b00-9e6c-1bf16bf94d33" />
 
 
-
+---
 [![Latest Release](https://img.shields.io/github/v/release/Mekotofeuka/MTPROTO_FIX_By_MEKO?color=neon)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Stars](https://img.shields.io/github/stars/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/stargazers) [![Forks](https://img.shields.io/github/forks/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/network/members)
+
 
 </div>
 
@@ -14,6 +15,7 @@
   · <a href="#Быстрый-старт">Установка</a> · <a href="#Как-работает">FAQ</a> · <a href="#Возможные-проблемыпочему-у-меня-может-не-работать">Решение проблем</a> ·
 </p>
 
+---
 
 **Помогает решить проблему**, которая появилась с 4 июня, **когда telegram клиент не может подключиться к mtproto прокси-серверу**. 
 **Признаки**: Подключение может зависать, долго устанавливаться или нестабильно проходить начальный TCP-этап, с дальнейшей блокировкой доступа клиента к серверу на 2 минуты после первого подключения.
