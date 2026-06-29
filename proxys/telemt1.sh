@@ -62,6 +62,15 @@ get_telemt_ports() {
     grep -E '^port[[:space:]]*=' "$config_path" 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' "'
 }
 
+# ── Функция получения онлайна Telemt ────────────────────────
+get_telemt_online() {
+    if is_telemt_installed; then
+        curl -s http://127.0.0.1:9091/v1/stats/users/active-ips 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' '
+    else
+        echo ""
+    fi
+}
+
 # ── Функция обновления пути к конфигу ──────────────────────
 update_config_path() {
     echo ""
@@ -295,7 +304,7 @@ restart_telemt() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}Telemt меню v0.43${NC}"
+    echo -e "  ${BOLD}Telemt меню v0.45${NC}"
     echo -e "  ${DIM}===========================${NC}"
     
     # Показываем информацию о Telemt, если установлен
@@ -319,6 +328,14 @@ while true; do
             else
                 echo -e "  ${BOLD}Порты:${NC} ${CYAN}${ports//$'\n'/, }${NC}"
             fi
+        fi
+        
+        # Онлайн
+        online=$(get_telemt_online)
+        if [ -n "$online" ] && [ "$online" -ge 0 ] 2>/dev/null; then
+            echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}${online}${NC}${BOLD} человек"
+        else
+            echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}0${NC}${BOLD} человек"
         fi
         echo ""
     fi
