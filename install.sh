@@ -11,6 +11,7 @@ CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 # ── Проверка root ────────────────────────────────────────────
@@ -21,51 +22,47 @@ fi
 
 # ── Шапка ─────────────────────────────────────────────────────
 echo ""
-echo -e "  ${BOLD}${CYAN}⚙️  УСТАНОВКА MEKOPR${NC}"
+echo -e "  ${BOLD}${CYAN}⚙️ УСТАНОВКА MEKOPR${NC}"
 echo -e "  ${BOLD}${DIM}═════════════════════════════════════════════════${NC}"
 echo ""
-
-# ── Подсчёт общего количества файлов ────────────────────────
-TOTAL_FILES=${#FILES[@]}
-CURRENT_FILE=0
-
-# ── Функция для получения размера файла ──────────────────────
-get_file_size() {
-    local url="$1"
-    local size=$(curl -sI "$url" 2>/dev/null | grep -i "Content-Length" | awk '{print $2}' | tr -d '\r')
-    if [ -n "$size" ] && [ "$size" -gt 0 ] 2>/dev/null; then
-        if [ "$size" -gt 1048576 ]; then
-            echo "$(echo "scale=1; $size/1048576" | bc) MB"
-        elif [ "$size" -gt 1024 ]; then
-            echo "$(echo "scale=0; $size/1024" | bc) KB"
-        else
-            echo "$size B"
-        fi
-    else
-        echo "?"
-    fi
-}
 
 # ── Создание директорий ──────────────────────────────────────
 mkdir -p /opt/mtpr-simple/proxys
 
-# ── Скачивание файлов с прогрессом ──────────────────────────
-for file in "${FILES[@]}"; do
-    CURRENT_FILE=$((CURRENT_FILE + 1))
-    FILE_NAME=$(basename "$file")
+# ── Асинхронное скачивание ──────────────────────────────────
+download_file() {
+    local file="$1"
+    local url="$BASE_URL/$file"
+    local dest="/opt/mtpr-simple/$file"
+    local name=$(basename "$file")
     
     # Получаем размер файла
-    FILE_SIZE=$(get_file_size "$BASE_URL/$file")
-    
-    echo -ne "  ${CYAN}[${CURRENT_FILE}/${TOTAL_FILES}]${NC} Загрузка ${BOLD}${FILE_NAME}${NC} (${FILE_SIZE})... "
-    
-    if curl -fsSL "$BASE_URL/$file" -o "/opt/mtpr-simple/$file" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
-    else
-        echo -e "${RED}✗ Ошибка${NC}"
-        exit 1
+    local size=$(curl -sI "$url" 2>/dev/null | grep -i "Content-Length" | awk '{print $2}' | tr -d '\r')
+    local size_str="?"
+    if [ -n "$size" ] && [ "$size" -gt 0 ] 2>/dev/null; then
+        if [ "$size" -gt 1048576 ]; then
+            size_str="$(echo "scale=1; $size/1048576" | bc) MB"
+        elif [ "$size" -gt 1024 ]; then
+            size_str="$(echo "scale=0; $size/1024" | bc) KB"
+        else
+            size_str="$size B"
+        fi
     fi
-done
+    
+    if curl -fsSL "$url" -o "$dest" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} ${BOLD}${name}${NC} (${size_str})"
+    else
+        echo -e "  ${RED}✗${NC} ${BOLD}${name}${NC} — ошибка загрузки"
+    fi
+}
+export -f download_file
+export BASE_URL
+
+# ── Запуск параллельной загрузки ────────────────────────────
+echo -e "  ${BOLD}Загрузка файлов...${NC}"
+echo ""
+
+printf "%s\n" "${FILES[@]}" | xargs -P 4 -I {} bash -c 'download_file "$@"' _ {}
 
 # ── Установка прав и создание ссылки ────────────────────────
 echo ""
