@@ -31,7 +31,8 @@
   - Позволяет удобно в 1 клик работать с TELEMT и MTPROTO.ZIG, поддерживая большинство необходимых команд для взаимодействия:
   - Установка, обновление, откат, настройка, изменение конфигов, просмотр логов без ввода команд.
 <div align="center">
-<img width="600" height="400" alt="image" src="https://github.com/user-attachments/assets/74b1ab33-999f-4277-9b0e-a6205228c557" />
+<img width="550" height="400" alt="image" src="https://github.com/user-attachments/assets/74b1ab33-999f-4277-9b0e-a6205228c557" />
+<img width="550" height="400" alt="image" src="https://github.com/user-attachments/assets/14c04e4d-3201-45bf-bbc2-cc0867258fb0" />
 
 
 <img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/3296a6c6-c097-4e5a-bd05-7c9f64154f79" />
