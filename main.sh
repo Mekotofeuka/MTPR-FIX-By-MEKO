@@ -648,7 +648,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.84${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.85${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -729,7 +729,7 @@ show_header() {
 
         echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC}${port_display}"
         echo -e "  ${BOLD}Версия Telemt:${NC} $version_display"
-        echo -e "  ${BOLD}Подключено к прокси (Telemt):${NC} ${CYAN}$online_count${NC} человек"
+        echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC} человек"
 
         # Статус MSS и synlimit
         local mss_status=""
@@ -751,9 +751,9 @@ show_header() {
     if [ "$mtprotozig_installed" = true ]; then
         local online_count=$(get_mtprotozig_online)
         if [ -n "$online_count" ] && [ "$online_count" -ge 0 ] 2>/dev/null; then
-            echo -e "  ${BOLD}Подключено к прокси (Mtproto.zig):${NC} ${CYAN}$online_count${NC} человек"
+            echo -e "  ${BOLD}Подключено к прокси Mtproto.zig:${NC} ${CYAN}$online_count${NC} человек"
         else
-            echo -e "  ${BOLD}Подключено к прокси (Mtproto.zig):${NC} ${CYAN}0${NC} человек"
+            echo -e "  ${BOLD}Подключено к прокси Mtproto.zig:${NC} ${CYAN}0${NC} человек"
         fi
     fi
 
@@ -815,10 +815,10 @@ main_menu() {
 
         echo -e "  ${CYAN}[1]${NC}  $item1"
         echo -e "  ${CYAN}[2]${NC}  $item2"
-        echo -e "  ${CYAN}[3]${NC}  ${GREEN}Выполнить базовую оптимизацию${NC}"
-        echo -e "  ${CYAN}[4]${NC}  ${RED}Полное удаление MEKOpr${NC}"
-        echo -e "  ${CYAN}[5]${NC}  ${NC}Обновить фикс${NC}"
-        echo -e "  ${CYAN}[6]${NC}  ${NC}Меню работы с прокси/конфигами${NC}"
+        echo -e "  ${CYAN}[3]${NC}  ${GREEN}${BOLD}Выполнить базовую оптимизацию${NC}"
+        echo -e "  ${CYAN}[4]${NC}  ${RED}${BOLD}Полное удаление MEKOpr${NC}"
+        echo -e "  ${CYAN}[5]${NC}  ${NC}${BOLD}Проверить наличие обновлений и обновить скрипт${NC}"
+        echo -e "  ${CYAN}[6]${NC}  ${NC}${BOLD}Меню работы с прокси/конфигами${NC}"
         
         if [ "$show_iptables_rules" = true ]; then
             echo -e "  ${RED}[7]${NC}  Удалить правила iptables-persistent"
