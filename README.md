@@ -1,8 +1,20 @@
+<div align="center">
+  
 # MTPROTO FIX By MEKO 
+
+<img width="300" height="300" alt="Без имени-1" src="https://github.com/user-attachments/assets/8decca32-f96a-4b00-9e6c-1bf16bf94d33" />
+
+
 
 [![Latest Release](https://img.shields.io/github/v/release/Mekotofeuka/MTPROTO_FIX_By_MEKO?color=neon)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/releases/latest) [![Stars](https://img.shields.io/github/stars/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/stargazers) [![Forks](https://img.shields.io/github/forks/Mekotofeuka/MTPROTO_FIX_By_MEKO?style=social)](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/network/members)
 
-Для чего нужен метод:
+</div>
+
+<p align="center">
+· <a href="#Быстрый-старт">Установка</a> · 
+</p>
+
+
 **Помогает решить проблему**, которая появилась с 4 июня, **когда telegram клиент не может подключиться к mtproto прокси-серверу**. 
 **Признаки**: Подключение может зависать, долго устанавливаться или нестабильно проходить начальный TCP-этап, с дальнейшей блокировкой доступа клиента к серверу на 2 минуты после первого подключения.
 
@@ -14,7 +26,7 @@
 - Медиа грузят практически с прежней скоростью
 -  **Ставится в один клик**
 
-# Быстрый старт:
+## Быстрый старт:
 
 **Внимание, данный скрипт платный, цена: 1 ⭐ на репозиторий**
 1. **Установить стандартный Telemt** версии 3.4.18 (версия новее работает нестабильно, появляются реконнекты и медиа могут грузить хуже.) Также **альтернативой** вы можете поставить "**MTPROTO.zig**", но тогда при установке необходимо указать --no-dpi, например sudo mtbuddy install --port 443 --domain rutube.ru --no-dpi --yes
