@@ -18,7 +18,7 @@ CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
 # ── Функция получения текущего пути к конфигу ──────────────
 get_config_path() {
     if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
-        local path=$(cat "$CONFIG_PATH_FILE")
+        path=$(cat "$CONFIG_PATH_FILE")
         if [ "$path" != "skip" ]; then
             echo "$path"
             return 0
@@ -31,7 +31,7 @@ get_config_path() {
 # ── Функция обновления пути к конфигу ──────────────────────
 update_config_path() {
     echo ""
-    local default_path="/etc/telemt/telemt.toml"
+    default_path="/etc/telemt/telemt.toml"
     echo -en "Укажите путь к конфигу Telemt (По умолчанию: [${default_path}] если не меняли - нажмите Enter, или [N/n] для возврата в меню): "
     read -r CONFIG_TELEMT_INPUT
 
@@ -96,7 +96,7 @@ purge_telemt() {
     echo -e "  • Конфигурационные файлы"
     echo -e "  • Systemd служба"
     echo ""
-    log_warning "Это действие нельзя отменить!"
+    echo -e "  ${YELLOW}[!]${NC} Это действие нельзя отменить!"
     echo -en "  ${BOLD}Продолжить удаление? [y/N]:${NC} "
     local confirm
     read -r confirm
@@ -126,7 +126,7 @@ purge_telemt() {
 
 # ── Функция открытия конфига ────────────────────────────────
 edit_config() {
-    local config_path=$(get_config_path)
+    config_path=$(get_config_path)
     
     # Проверяем, существует ли файл
     if [ ! -f "$config_path" ]; then
@@ -174,19 +174,19 @@ restart_telemt() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}Telemt меню${NC}"
+    echo -e "  ${BOLD}Telemt меню v0.1${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
-    echo -e "  ${CYAN}[1]${NC}  Установить Telemt 3.4.18"
-    echo -e "  ${CYAN}[2]${NC}  Открыть конфиг Telemt"
-    echo -e "  ${CYAN}[3]${NC}  Перезапустить Telemt"
-    echo -e "  ${CYAN}[4]${NC}  Обновить путь к конфигу Telemt"
-    echo -e "  ${RED}[5]${NC}  Удалить Telemt"
-    echo -e "  ${CYAN}[0]${NC}  Назад в прокси меню"
+    echo -e "  ${CYAN}[1]${BOLD}  Установить Telemt 3.4.18"
+    echo -e "  ${CYAN}[2]${BOLD}  Открыть конфиг Telemt"
+    echo -e "  ${CYAN}[3]${BOLD}  Перезапустить Telemt"
+    echo -e "  ${CYAN}[4]${BOLD}  Обновить путь к конфигу Telemt"
+    echo -e "  ${RED}[5]${RED}  Удалить Telemt"
+    echo -e "  ${CYAN}[0]${BOLD}  Назад в прокси меню"
     echo ""
     
     # Показываем текущий путь к конфигу
-    local current_path=$(get_config_path)
+    current_path=$(get_config_path)
     echo -e "  ${DIM}Текущий путь к конфигу: ${current_path}${NC}"
     echo ""
     
