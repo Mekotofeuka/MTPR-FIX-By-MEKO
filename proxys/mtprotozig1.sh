@@ -29,6 +29,34 @@ is_mtprotozig_installed() {
     return 1
 }
 
+# ── Функция получения версии MTProtoZig ─────────────────────
+get_mtprotozig_version() {
+    if command -v mtbuddy >/dev/null 2>&1; then
+        sudo mtbuddy --version 2>/dev/null | head -1 | awk '{print $2}'
+    else
+        echo ""
+    fi
+}
+
+# ── Функция получения порта из конфига ──────────────────────
+get_mtprotozig_port() {
+    local config_path="/opt/mtproto-proxy/config.toml"
+    if [ -f "$config_path" ]; then
+        grep -E '^port[[:space:]]*=' "$config_path" 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' "'
+    else
+        echo ""
+    fi
+}
+
+# ── Функция получения онлайна из логов ──────────────────────
+get_mtprotozig_online() {
+    if is_mtprotozig_installed; then
+        sudo journalctl -u mtproto-proxy -n 50 2>/dev/null | grep -o 'users_total=[0-9]*' | tail -1 | cut -d'=' -f2
+    else
+        echo ""
+    fi
+}
+
 # ── Функция получения ссылки для подключения ────────────────
 get_proxy_link() {
     if command -v mtbuddy >/dev/null 2>&1; then
@@ -240,9 +268,36 @@ purge_proxy() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}MTProtoZig меню v0.22${NC}"
+    echo -e "  ${BOLD}MTProtoZig меню v0.24${NC}"
     echo -e "  ${DIM}===========================${NC}"
-    echo ""
+    
+    # Проверяем, установлен ли MTProtoZig
+    if is_mtprotozig_installed; then
+        echo ""
+        echo -e "  ${GREEN}MTProtoZig установлен${NC}"
+        
+        # Версия
+        version=$(get_mtprotozig_version)
+        if [ -n "$version" ]; then
+            echo -e "  ${NC}${BOLD}Версия:${NC} ${GREEN}${version}${NC}"
+        fi
+        
+        # Порт
+        port=$(get_mtprotozig_port)
+        if [ -n "$port" ]; then
+            echo -e "  ${NC}${BOLD}Порт:${NC} ${CYAN}${port}${NC}"
+        fi
+        
+        # Онлайн
+        online=$(get_mtprotozig_online)
+        if [ -n "$online" ] && [ "$online" -ge 0 ] 2>/dev/null; then
+            echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}${online}${NC}${BOLD} человек"
+        else
+            echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}0${NC}${BOLD} человек"
+        fi
+        echo ""
+    fi
+    
     echo -e "  ${CYAN}[1]${NC}  ${BOLD}Установить Zig CLI${NC}"
     echo -e "  ${CYAN}[2]${NC}  ${BOLD}Установить прокси${NC}"
     echo -e "  ${CYAN}[3]${NC}  ${BOLD}Открыть конфиг${NC}"
@@ -252,18 +307,19 @@ while true; do
     echo -e "  ${CYAN}[0]${NC}  ${BOLD}Назад в прокси меню${NC}"
     echo ""
 
-    # Проверяем, установлен ли MTProtoZig, и показываем соответствующий статус
-    if is_mtprotozig_installed; then
+    # Если MTProtoZig не установлен, показываем это
+    if ! is_mtprotozig_installed; then
+        echo -e "  ${YELLOW}MTProtoZig не установлен${NC}"
+        echo ""
+    else
+        # Показываем текущий путь к конфигу и ссылку
         echo -e "  ${DIM}Текущий путь к конфигу: /opt/mtproto-proxy/config.toml${NC}"
-        # Показываем ссылку для подключения
         proxy_link=$(get_proxy_link)
         if [ -n "$proxy_link" ]; then
             echo -e "  ${DIM}Ссылка для подключения: ${CYAN}${proxy_link}${NC}"
         fi
-    else
-        echo -e "  ${YELLOW}MTProtoZig не установлен${NC}"
+        echo ""
     fi
-    echo ""
 
     echo -en "  ${BOLD}Выбор:${NC} "
     read -r choice
