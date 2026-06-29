@@ -620,7 +620,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.82${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.83${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -700,6 +700,18 @@ show_header() {
     echo ""
 }
 
+# ── Функция для открытия подменю прокси ─────────────────────
+open_proxy_menu() {
+    local PROXY_MENU_SCRIPT="/opt/mtpr-simple/proxys/proxymenu.sh"
+    if [ -f "$PROXY_MENU_SCRIPT" ]; then
+        exec "$PROXY_MENU_SCRIPT"
+    else
+        log_error "Файл $PROXY_MENU_SCRIPT не найден"
+        echo -e "  ${GRAY}Нажмите любую клавишу для возврата в меню...${NC}"
+        read -rsn1
+    fi
+}
+
 # ── Главное меню ─────────────────────────────────────────────
 main_menu() {
     # Проверяем аргумент -auto_install
@@ -745,10 +757,11 @@ main_menu() {
         echo -e "  ${CYAN}[2]${NC}  $item2"
         echo -e "  ${CYAN}[3]${NC}  ${GREEN}Выполнить базовую оптимизацию${NC}"
         echo -e "  ${CYAN}[4]${NC}  ${RED}Полное удаление MEKOpr${NC}"
-        echo -e "  ${CYAN}[5]${NC}  ${BLUE}Обновить фикс${NC}"
+        echo -e "  ${CYAN}[5]${NC}  ${NC}Обновить фикс${NC}"
+        echo -e "  ${CYAN}[6]${NC}  ${NC}Меню работы с прокси/конфигами${NC}"
         
         if [ "$show_iptables_rules" = true ]; then
-            echo -e "  ${RED}[6]${NC}  Удалить правила iptables-persistent"
+            echo -e "  ${RED}[7]${NC}  Удалить правила iptables-persistent"
         fi
         
         echo -e "  ${CYAN}[0]${NC}  Выход"
@@ -814,6 +827,9 @@ main_menu() {
             update_script
             ;;
         6)
+            open_proxy_menu
+            ;;
+        7)
             echo ""
             remove_iptables_rules
             echo ""
