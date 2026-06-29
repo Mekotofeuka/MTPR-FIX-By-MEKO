@@ -654,7 +654,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.89${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.810${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -718,7 +718,7 @@ show_header() {
         elif [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
             local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
             if [[ "$port" =~ ^[0-9]+$ ]]; then
-                port_display=" (порт $port)"
+                port_display=" ${NC}${BOLD} (порт $port)"
                 save_port "$port"
             else
                 port_display=" (порт не определён)"
@@ -748,7 +748,7 @@ show_header() {
 
         echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC}${port_display}"
         echo -e "  ${BOLD}Версия Telemt:${NC} $version_display"
-        echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC} человек"
+        echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC}${BOLD} человек"
 
         # Статус MSS и synlimit
         local mss_status=""
@@ -837,7 +837,7 @@ main_menu() {
         echo -e "  ${CYAN}[3]${NC}  ${GREEN}${BOLD}Выполнить базовую оптимизацию${NC}"
         echo -e "  ${CYAN}[4]${NC}  ${RED}${BOLD}Полное удаление MEKOpr${NC}"
         echo -e "  ${CYAN}[5]${NC}  ${NC}${BOLD}Проверить наличие обновлений и обновить скрипт${NC}"
-        echo -e "  ${CYAN}[6]${NC}  ${NC}${BOLD}Меню работы с прокси/конфигами${NC}"
+        echo -e "  ${CYAN}[6]${NC}  ${NC}${BOLD}Меню прокси и конфигов - установка, обновление, настройка, удаление${NC}"
         
         if [ "$show_iptables_rules" = true ]; then
             echo -e "  ${RED}[7]${NC}  Удалить правила iptables-persistent"
