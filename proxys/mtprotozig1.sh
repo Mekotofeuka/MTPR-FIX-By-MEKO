@@ -268,13 +268,13 @@ purge_proxy() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}MTProtoZig меню v0.24${NC}"
+    echo -e "  ${BOLD}MTProtoZig меню v0.25${NC}"
     echo -e "  ${DIM}===========================${NC}"
     
     # Проверяем, установлен ли MTProtoZig
     if is_mtprotozig_installed; then
         echo ""
-        echo -e "  ${GREEN}MTProtoZig установлен${NC}"
+        echo -e "  ${NC}${BOLD}MTProtoZig${GREEN}${BOLD} установлен${NC}"
         
         # Версия
         version=$(get_mtprotozig_version)
