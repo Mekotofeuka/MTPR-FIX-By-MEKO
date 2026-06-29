@@ -52,7 +52,7 @@ update_config_path() {
     if [[ "$CONFIG_TELEMT_INPUT" =~ ^[Nn]$ ]]; then
         echo ""
         echo -e "  ${GRAY}Возврат в меню...${NC}"
-        sleep 1
+        sleep 0.1
         return 1
     fi
 
@@ -68,7 +68,7 @@ update_config_path() {
         read -r confirm_path
         if [[ ! "$confirm_path" =~ ^[yY]$ ]]; then
             echo -e "  ${GRAY}Возврат в меню...${NC}"
-            sleep 1
+            sleep 0.1
             return 1
         fi
     fi
@@ -232,7 +232,7 @@ while true; do
             ;;
         *)
             echo "  Неверный выбор"
-            sleep 1
+            sleep 0.1
             ;;
     esac
 done
