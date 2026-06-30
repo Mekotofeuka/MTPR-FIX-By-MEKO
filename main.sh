@@ -407,23 +407,8 @@ if ! iptables -t filter -C INPUT -j "$CHAIN" 2>/dev/null; then
 fi
 
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
-    -m tcp --tcp-flags SYN SYN \
-    -m length --length 64 \
-    -m ttl --ttl-lt 65 \
-    -m hashlimit \
-    --hashlimit-name ios_"$PORT" \
-    --hashlimit-mode srcip \
-    --hashlimit-upto 15/second \
-    --hashlimit-burst 30 \
-    --hashlimit-htable-expire 60000 \
-    --hashlimit-htable-size 32768 \
+    -m u32 --u32 "32 & 0x00FFFFFF = 0x0002FFFF && 40 & 0xFF000000 = 0x02000000 && 44 & 0xFFFF0000 = 0x01030000 && 48 & 0xFFFFFF00 = 0x01010800 && 60 & 0xFFFFFFFF = 0x04020000" \
     -j ACCEPT
-
-iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
-    -m tcp --tcp-flags SYN SYN \
-    -m length --length 64 \
-    -m ttl --ttl-lt 65 \
-    -j REJECT --reject-with tcp-reset
 
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     -m hashlimit \
@@ -438,7 +423,6 @@ iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     -j REJECT --reject-with tcp-reset
 
-# Если ни одно правило не сработало — возвращаем пакет обратно в INPUT
 iptables -t filter -A "$CHAIN" -j RETURN
 
 APPLY_SCRIPT_EOF
@@ -657,7 +641,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.9${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.0${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
