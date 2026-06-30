@@ -74,10 +74,19 @@ ln -sf /opt/mtpr-simple/main.sh /usr/local/bin/mekopr && echo -e "${GREEN}✓${N
 
 # ── Завершение ───────────────────────────────────────────────
 echo ""
-echo -e "  ${BOLD}${GREEN}✅ Установка MEKOPR успешно завершена!${NC}"
+echo -e "  ${BOLD}${GREEN}✅ Установка MEKOPR успешно завершена${NC}"
 echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
 echo ""
-echo -e "  Для открытия меню при дальнейшей работе используйте команду ${BOLD}mekopr${NC}"
+echo -e "  Для открытия меню используйте команду ${BOLD}mekopr${NC}"
 echo ""
 
-exec /opt/mtpr-simple/main.sh </dev/tty
+# ── Проверяем наличие TTY перед запуском меню ──────────────
+if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+    echo -e "  ${CYAN}[i]${NC} Запуск меню..."
+    echo ""
+    exec /opt/mtpr-simple/main.sh </dev/tty
+else
+    echo -e "  ${YELLOW}[!]${NC} Интерактивный режим недоступен (нет TTY)."
+    echo -e "  ${GRAY}${BOLD}Запустите меню вручную командой: ${BOLD}${NC} sudo mekopr${NC}"
+    exit 0
+fi
