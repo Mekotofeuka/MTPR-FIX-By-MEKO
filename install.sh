@@ -41,13 +41,22 @@ download_file() {
     local size_str="?"
     if [ -n "$size" ] && [ "$size" -gt 0 ] 2>/dev/null; then
         if [ "$size" -gt 1048576 ]; then
-            size_str="$(echo "scale=1; $size/1048576" | bc) MB"
+            local mb=$((size / 1048576))
+            local remainder=$(((size % 1048576) / 104857))
+            if [ "$remainder" -gt 0 ]; then
+                size_str="${mb}.${remainder} MB"
+            else
+                size_str="${mb} MB"
+            fi
         elif [ "$size" -gt 1024 ]; then
-            size_str="$(echo "scale=0; $size/1024" | bc) KB"
+            size_str="$((size / 1024)) KB"
         else
             size_str="$size B"
         fi
     fi
+    
+    # Показываем процесс загрузки
+    echo -e "  ${CYAN}⏳${NC} Загрузка ${BOLD}${name}${NC}..."
     
     if curl -fsSL "$url" -o "$dest" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} ${BOLD}${name}${NC} (${size_str})"
@@ -77,7 +86,7 @@ echo ""
 echo -e "  ${BOLD}${GREEN}✅ Установка MEKOPR успешно завершена!${NC}"
 echo -e "  ${DIM}─────────────────────────────────────────────────────${NC}"
 echo ""
-echo -e "  Для открытия меню при дальнейшей работе используйте команду ${BOLD}mekopr${NC}"
+echo -e "  Для открытия меню при дальнейшей работе используйте команду ${BOLD}${GREEN}mekopr${NC}"
 echo ""
 
 if [ -r /dev/tty ]; then
