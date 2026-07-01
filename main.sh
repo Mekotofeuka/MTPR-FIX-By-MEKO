@@ -958,7 +958,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.3${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.31${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -1196,7 +1196,7 @@ main_menu() {
         fi
 
         if are_bad_options_enabled; then
-            local item2="${NC}${BOLD}Отключить mss, mss_bulk и synlimit в cfg telemt${NC}"
+            local item2="${GREEN}${BOLD}Отключить mss, mss_bulk и synlimit в конфиге telemt${NC}"
         else
             local item2="${NC}${BOLD}Включить mss и mss_bulk в конфиге telemt${RED} (не рекомендуется)"
         fi
@@ -1209,8 +1209,8 @@ main_menu() {
 
         echo -e "  ${CYAN}[1]${NC}  $item1"
         echo -e "  ${CYAN}[2]${NC}  $item3_text"
-        echo -e "  ${CYAN}[3]${NC}  ${NC}${BOLD}Меню прокси и конфигов - установка, обновление, настройка, удаление${NC}"
-        echo -e "  ${CYAN}[4]${NC}  ${NC}${BOLD}Проверить наличие обновлений и обновить скрипт${NC}"
+        echo -e "  ${CYAN}[3]${NC}  ${NC}${BOLD}Меню прокси и кфг${NC}"
+        echo -e "  ${CYAN}[4]${NC}  ${NC}${BOLD}Обновить скрипт${NC}"
         echo -e "  ${CYAN}[5]${NC}  $item2"
         echo -e "  ${CYAN}[6]${NC}  ${NC}${BOLD}Проверить ограничения на сервере${NC}"
         echo -e "  ${CYAN}[7]${NC}  ${RED}${BOLD}Полное удаление MEKOpr${NC}"
