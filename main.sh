@@ -958,7 +958,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.27${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.28${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -1113,21 +1113,21 @@ is_optimization_applied() {
     
     # Проверяем sysctl параметры (3 ключевых)
     if [ -f /etc/sysctl.d/99-custom.conf ]; then
-        # Проверяем tcp_keepalive_time
-        local current_time=$(sysctl -n net.ipv4.tcp_keepalive_time 2>/dev/null)
-        if [ "$current_time" = "45" ]; then
+        # Проверяем tcp_congestion_control (BBR)
+        local current_congestion=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+        if [ "$current_congestion" = "bbr" ]; then
             check_count=$((check_count + 1))
         fi
         
-        # Проверяем tcp_keepalive_intvl
-        local current_intvl=$(sysctl -n net.ipv4.tcp_keepalive_intvl 2>/dev/null)
-        if [ "$current_intvl" = "15" ]; then
+        # Проверяем default_qdisc (fq)
+        local current_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+        if [ "$current_qdisc" = "fq" ]; then
             check_count=$((check_count + 1))
         fi
         
-        # Проверяем tcp_keepalive_probes
-        local current_probes=$(sysctl -n net.ipv4.tcp_keepalive_probes 2>/dev/null)
-        if [ "$current_probes" = "3" ]; then
+        # Проверяем tcp_fastopen
+        local current_fastopen=$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null)
+        if [ "$current_fastopen" = "3" ]; then
             check_count=$((check_count + 1))
         fi
     fi
@@ -1197,8 +1197,8 @@ main_menu() {
 
         echo -e "  ${CYAN}[1]${NC}  $item1"
         echo -e "  ${CYAN}[2]${NC}  $item3_text"
-        echo -e "  ${CYAN}[3]${NC}  ${NC}${BOLD}Меню прокси и конфигов - установка, обновление, настройка, удаление${NC}"
-        echo -e "  ${CYAN}[4]${NC}  ${NC}${BOLD}Проверить наличие обновлений и обновить скрипт${NC}"
+        echo -e "  ${CYAN}[3]${NC}  ${NC}${BOLD}Меню работы с прокси с кфг${NC}"
+        echo -e "  ${CYAN}[4]${NC}  ${NC}${BOLD}Обновить скрипт до последней версии${NC}"
         echo -e "  ${CYAN}[5]${NC}  $item2"
         echo -e "  ${CYAN}[6]${NC}  ${NC}${BOLD}Проверить ограничения на сервере${NC}"
         echo -e "  ${CYAN}[7]${NC}  ${RED}${BOLD}Полное удаление MEKOpr${NC}"
