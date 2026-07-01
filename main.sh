@@ -852,19 +852,59 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.18${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.19${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
-    if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ] && pgrep -x telemt >/dev/null 2>&1; then
-        local current_port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+    # ── ОПРЕДЕЛЯЕМ ПОРТ КАЖДЫЙ РАЗ ──────────────────────────
+    local current_port=""
+    local config_path=""
+    
+    # Проверяем, есть ли сохранённый путь
+    if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
+        config_path=$(cat "$CONFIG_PATH_FILE")
+        if [ "$config_path" = "skip" ]; then
+            config_path=""
+        fi
+    fi
+    
+    # Если сохранённого пути нет, используем тот что в CONFIG_TELEMT
+    if [ -z "$config_path" ] && [ -n "$CONFIG_TELEMT" ] && [ "$CONFIG_TELEMT" != "skip" ]; then
+        config_path="$CONFIG_TELEMT"
+    fi
+    
+    # Если есть путь и файл существует — берём порт из него
+    if [ -n "$config_path" ] && [ -f "$config_path" ]; then
+        current_port=$(grep -E '^port[[:space:]]*=' "$config_path" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
         if [[ "$current_port" =~ ^[0-9]+$ ]]; then
             save_port "$current_port"
-        else
-            local detected_port=$(ss -tlnp 2>/dev/null | grep telemt | grep -oP ':\K[0-9]+' | head -1)
-            if [[ -n "$detected_port" ]]; then
-                save_port "$detected_port"
+        fi
+    fi
+    
+    # Если порт не определился через конфиг — пробуем через detect_telemt_advanced
+    if [ -z "$current_port" ] || ! [[ "$current_port" =~ ^[0-9]+$ ]]; then
+        local detected_info=$(detect_telemt_advanced)
+        local detected_path="${detected_info%:*}"
+        local detected_port="${detected_info#*:}"
+        
+        if [ -n "$detected_port" ] && [[ "$detected_port" =~ ^[0-9]+$ ]]; then
+            current_port="$detected_port"
+            save_port "$current_port"
+            # Если нашелся конфиг через detect, обновляем CONFIG_TELEMT
+            if [ -n "$detected_path" ] && [ -f "$detected_path" ]; then
+                CONFIG_TELEMT="$detected_path"
+                mkdir -p /opt/mtpr-simple
+                echo "$detected_path" > "$CONFIG_PATH_FILE"
             fi
+        fi
+    fi
+    
+    # Если всё ещё нет порта — пробуем через ss
+    if [ -z "$current_port" ] || ! [[ "$current_port" =~ ^[0-9]+$ ]]; then
+        local detected_port=$(ss -tlnp 2>/dev/null | grep telemt | grep -oP ':\K[0-9]+' | head -1)
+        if [[ -n "$detected_port" ]] && [[ "$detected_port" =~ ^[0-9]+$ ]]; then
+            current_port="$detected_port"
+            save_port "$current_port"
         fi
     fi
 
@@ -901,18 +941,9 @@ show_header() {
 
     if [ "$telemt_installed" = true ]; then
         local port_display=""
-        local saved_port=$(get_saved_port)
         
-        if [ -n "$saved_port" ] && [[ "$saved_port" =~ ^[0-9]+$ ]]; then
-            port_display=" (порт $saved_port)"
-        elif [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
-            local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-            if [[ "$port" =~ ^[0-9]+$ ]]; then
-                port_display=" (порт $port)"
-                save_port "$port"
-            else
-                port_display="${NC}${BOLD} (порт не определён)"
-            fi
+        if [ -n "$current_port" ] && [[ "$current_port" =~ ^[0-9]+$ ]]; then
+            port_display=" (порт $current_port)"
         else
             port_display=" (порт не определён)"
         fi
