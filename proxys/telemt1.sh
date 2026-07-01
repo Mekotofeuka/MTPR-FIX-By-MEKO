@@ -39,12 +39,17 @@ _looks_like_telemt_config() {
     grep -qE '^\[access\.users\]|^\[censorship\]|^\[general\.modes\]|^tls_domain[[:space:]]*=' "$_file" 2>/dev/null
 }
 
-# ── Расширенное обнаружение Telemt (из реаниматора) ──────────
+# ── Расширенное обнаружение Telemt ──────────
 detect_telemt_advanced() {
     local DETECTED_CONFIG_PATH=""
     local DETECTED_PORT=""
     local DETECTED_IP=""
     local DETECTED_PUBLIC_HOST=""
+    local DETECTED_CLASSIC=""
+    local DETECTED_SECURE=""
+    local DETECTED_TLS=""
+    local DETECTED_TLS_DOMAIN=""
+    local DETECTED_SECRET=""
     
     # 1. Локальный процесс telemt
     if pgrep -x telemt &>/dev/null || systemctl is-active telemt.service &>/dev/null 2>&1; then
@@ -74,14 +79,21 @@ detect_telemt_advanced() {
         fi
     fi
     
-    # 4. Получаем порт, ip и public_host из конфига
+    # 4. Получаем параметры из конфига
     if [ -n "$DETECTED_CONFIG_PATH" ] && [ -f "$DETECTED_CONFIG_PATH" ]; then
         DETECTED_PORT=$(_toml_get_value "port" "$DETECTED_CONFIG_PATH")
         DETECTED_IP=$(grep -E '^ip[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
         DETECTED_PUBLIC_HOST=$(grep -E '^public_host[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        DETECTED_TLS_DOMAIN=$(grep -E '^tls_domain[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        DETECTED_SECRET=$(grep -E '^[[:space:]]*[^#]*[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | grep -v '^#' | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        
+        # Проверяем режимы
+        DETECTED_CLASSIC=$(grep -E '^classic[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | grep -v '^#' | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        DETECTED_SECURE=$(grep -E '^secure[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | grep -v '^#' | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        DETECTED_TLS=$(grep -E '^tls[[:space:]]*=' "$DETECTED_CONFIG_PATH" 2>/dev/null | grep -v '^#' | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
     fi
     
-    echo "$DETECTED_CONFIG_PATH:$DETECTED_PORT:$DETECTED_IP:$DETECTED_PUBLIC_HOST"
+    echo "$DETECTED_CONFIG_PATH:$DETECTED_PORT:$DETECTED_IP:$DETECTED_PUBLIC_HOST:$DETECTED_CLASSIC:$DETECTED_SECURE:$DETECTED_TLS:$DETECTED_TLS_DOMAIN:$DETECTED_SECRET"
 }
 
 # ── Функция получения публичного IP ──────────────────────────
@@ -92,6 +104,155 @@ get_public_ip() {
     _ip=$(curl -4 -fsS --max-time 5 https://icanhazip.com 2>/dev/null) ||
     _ip=""
     echo "$_ip"
+}
+
+# ── Функция генерации секрета для ссылки ─────────────────────
+generate_secret() {
+    local secret="$1"
+    local tls_domain="$2"
+    local mode="$3"  # classic, secure, tls
+    
+    local result=""
+    
+    case "$mode" in
+        classic)
+            result="$secret"
+            ;;
+        secure)
+            result="ee${secret}"
+            ;;
+        tls)
+            if [ -n "$tls_domain" ]; then
+                local hex_domain=$(echo -n "$tls_domain" | xxd -p -c 256 2>/dev/null)
+                if [ -n "$hex_domain" ]; then
+                    result="ee${secret}${hex_domain}"
+                else
+                    result="ee${secret}"
+                fi
+            else
+                result="ee${secret}"
+            fi
+            ;;
+        *)
+            result="$secret"
+            ;;
+    esac
+    
+    echo "$result"
+}
+
+# ── Функция формирования ссылок для подключения ─────────────
+generate_proxy_links() {
+    local config_path=$(get_config_path)
+    if [ ! -f "$config_path" ]; then
+        return 1
+    fi
+    
+    # Получаем данные из конфига через расширенное обнаружение
+    local detected_info=$(detect_telemt_advanced)
+    local IFS=':'
+    local parts=($detected_info)
+    unset IFS
+    
+    local detected_path="${parts[0]}"
+    local detected_port="${parts[1]}"
+    local detected_ip="${parts[2]}"
+    local detected_public_host="${parts[3]}"
+    local detected_classic="${parts[4]}"
+    local detected_secure="${parts[5]}"
+    local detected_tls="${parts[6]}"
+    local detected_tls_domain="${parts[7]}"
+    local detected_secret="${parts[8]}"
+    
+    # Определяем порт
+    local port=""
+    if [ -n "$detected_port" ]; then
+        port="$detected_port"
+    else
+        port=$(get_telemt_ports | head -1)
+    fi
+    if [ -z "$port" ]; then
+        port="443"
+    fi
+    
+    # Определяем сервер (IP или public_host)
+    local server=""
+    if [ -n "$detected_public_host" ]; then
+        server="$detected_public_host"
+    elif [ -n "$detected_ip" ]; then
+        server="$detected_ip"
+    else
+        server=$(get_public_ip)
+    fi
+    if [ -z "$server" ]; then
+        server=$(curl -4 -fsS --max-time 3 https://api.ipify.org 2>/dev/null)
+    fi
+    if [ -z "$server" ]; then
+        server="SERVER_IP"
+    fi
+    
+    # Если нет секрета — выходим
+    if [ -z "$detected_secret" ]; then
+        return 1
+    fi
+    
+    # Определяем какие режимы включены
+    local classic_enabled=false
+    local secure_enabled=false
+    local tls_enabled=false
+    
+    if [ "$detected_classic" = "true" ]; then
+        classic_enabled=true
+    fi
+    if [ "$detected_secure" = "true" ]; then
+        secure_enabled=true
+    fi
+    if [ "$detected_tls" = "true" ]; then
+        tls_enabled=true
+    fi
+    
+    # Если ни один режим не включен явно, но есть tls_domain — считаем что tls включен
+    if [ "$classic_enabled" = false ] && [ "$secure_enabled" = false ] && [ "$tls_enabled" = false ]; then
+        if [ -n "$detected_tls_domain" ]; then
+            tls_enabled=true
+        else
+            # Если ничего не включено — используем classic как дефолт
+            classic_enabled=true
+        fi
+    fi
+    
+    local links=""
+    
+    # Classic режим
+    if [ "$classic_enabled" = true ]; then
+        local classic_secret=$(generate_secret "$detected_secret" "" "classic")
+        links="${links}Classic:\n"
+        links="${links}tg://proxy?server=${server}&port=${port}&secret=${classic_secret}\n"
+    fi
+    
+    # Secure режим (ee в начале)
+    if [ "$secure_enabled" = true ]; then
+        local secure_secret=$(generate_secret "$detected_secret" "" "secure")
+        if [ -z "$links" ]; then
+            links="${links}Secure:\n"
+        else
+            links="${links}Secure:\n"
+        fi
+        links="${links}tg://proxy?server=${server}&port=${port}&secret=${secure_secret}\n"
+    fi
+    
+    # TLS режим (ee + secret + hex(tls_domain))
+    if [ "$tls_enabled" = true ]; then
+        local tls_secret=$(generate_secret "$detected_secret" "$detected_tls_domain" "tls")
+        if [ -z "$links" ]; then
+            links="${links}TLS:\n"
+        else
+            links="${links}TLS:\n"
+        fi
+        links="${links}tg://proxy?server=${server}&port=${port}&secret=${tls_secret}\n"
+    fi
+    
+    echo -e "$links"
 }
 
 # ── Функция получения текущего пути к конфигу ──────────────
@@ -147,86 +308,6 @@ get_telemt_online() {
     else
         echo ""
     fi
-}
-
-# ── Функция формирования ссылки для подключения ─────────────
-generate_proxy_link() {
-    local config_path=$(get_config_path)
-    if [ ! -f "$config_path" ]; then
-        echo ""
-        return 1
-    fi
-    
-    # Получаем данные из конфига через расширенное обнаружение
-    local detected_info=$(detect_telemt_advanced)
-    local detected_path="${detected_info%%:*}"
-    local remaining="${detected_info#*:}"
-    local detected_port="${remaining%%:*}"
-    remaining="${remaining#*:}"
-    local detected_ip="${remaining%%:*}"
-    local detected_public_host="${remaining#*:}"
-    
-    # Определяем порт
-    local port=""
-    if [ -n "$detected_port" ]; then
-        port="$detected_port"
-    else
-        port=$(get_telemt_ports | head -1)
-    fi
-    if [ -z "$port" ]; then
-        port="443"
-    fi
-    
-    # Определяем сервер (IP или public_host)
-    local server=""
-    if [ -n "$detected_public_host" ]; then
-        server="$detected_public_host"
-    elif [ -n "$detected_ip" ]; then
-        server="$detected_ip"
-    else
-        server=$(get_public_ip)
-    fi
-    if [ -z "$server" ]; then
-        server=$(curl -4 -fsS --max-time 3 https://api.ipify.org 2>/dev/null)
-    fi
-    if [ -z "$server" ]; then
-        server="SERVER_IP"
-    fi
-    
-    # Получаем secret (первый пользователь из access.users)
-    local secret=""
-    if [ -f "$config_path" ]; then
-        secret=$(grep -E '^[[:space:]]*[^#]*[[:space:]]*=' "$config_path" 2>/dev/null | grep -v '^#' | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-    fi
-    
-    # Получаем tls_domain
-    local tls_domain=""
-    if [ -f "$config_path" ]; then
-        tls_domain=$(grep -E '^tls_domain[[:space:]]*=' "$config_path" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-    fi
-    
-    # Формируем secret с tls_domain если он есть
-    local final_secret=""
-    if [ -n "$secret" ]; then
-        if [ -n "$tls_domain" ]; then
-            # Конвертируем tls_domain в hex
-            local hex_domain=$(echo -n "$tls_domain" | xxd -p -c 256 2>/dev/null)
-            if [ -n "$hex_domain" ]; then
-                final_secret="${secret}${hex_domain}"
-            else
-                final_secret="$secret"
-            fi
-        else
-            final_secret="$secret"
-        fi
-    fi
-    
-    if [ -z "$final_secret" ]; then
-        echo ""
-        return 1
-    fi
-    
-    echo "tg://proxy?server=${server}&port=${port}&secret=${final_secret}"
 }
 
 # ── Функция обновления пути к конфигу ──────────────────────
@@ -457,7 +538,7 @@ restart_telemt() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}Telemt меню v0.46${NC}"
+    echo -e "  ${BOLD}Telemt меню v0.48${NC}"
     echo -e "  ${DIM}===========================${NC}"
     
     # Показываем информацию о Telemt, если установлен
@@ -482,20 +563,20 @@ while true; do
             fi
         fi
         
+        # ── ГЕНЕРИРУЕМ ССЫЛКИ ──────────────────────────────────
+        links=$(generate_proxy_links)
+        if [ -n "$links" ]; then
+            echo ""
+            echo -e "  ${BOLD}Ссылки для подключения:${NC}"
+            echo -e "$links"
+        fi
+        
         # Онлайн
         online=$(get_telemt_online)
         if [ -n "$online" ] && [ "$online" -ge 0 ] 2>/dev/null; then
             echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}${online}${NC}${BOLD} человек"
         else
             echo -e "  ${NC}${BOLD}Подключено к прокси:${NC} ${CYAN}${BOLD}0${NC}${BOLD} человек"
-        fi
-        
-        # ── ГЕНЕРИРУЕМ ССЫЛКУ ────────────────────────────────
-        proxy_link=$(generate_proxy_link)
-        if [ -n "$proxy_link" ]; then
-            echo ""
-            echo -e "  ${BOLD}Ссылка для подключения:${NC}"
-            echo -e "  ${CYAN}${proxy_link}${NC}"
         fi
         
         echo ""
