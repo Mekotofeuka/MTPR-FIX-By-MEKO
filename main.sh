@@ -288,12 +288,22 @@ is_our_syn_fix_installed() {
     is_syn_fix_chain_installed
 }
 
-# ── ПРОВЕРКА MSS И SYN_LIMIT В КОНФИГЕ TELEMT ──────────────
+# ── ПРОВЕРКА MSS, MSS_BULK И SYN_LIMIT В КОНФИГЕ TELEMT ────
 is_mss_enabled() {
     if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
         return 1
     fi
-    if grep -E 'client_mss[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+    if grep -E '^[[:space:]]*client_mss[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+is_mss_bulk_enabled() {
+    if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
+        return 1
+    fi
+    if grep -E '^[[:space:]]*mss_bulk[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
         return 0
     fi
     return 1
@@ -303,20 +313,103 @@ is_synlimit_enabled() {
     if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
         return 1
     fi
-    if grep -E 'synlimit[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+    if grep -E '^[[:space:]]*synlimit[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
         return 0
     fi
     return 1
 }
 
-are_bad_options_enabled() {
-    if is_mss_enabled || is_synlimit_enabled; then
+are_mss_options_enabled() {
+    if is_mss_enabled || is_mss_bulk_enabled; then
         return 0
     else
         return 1
     fi
 }
 
+are_bad_options_enabled() {
+    if is_mss_enabled || is_mss_bulk_enabled || is_synlimit_enabled; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ── ВКЛЮЧЕНИЕ MSS И MSS_BULK ───────────────────────────────
+enable_mss_options() {
+    if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
+        log_error "Файл конфига не найден или не указан"
+        return 1
+    fi
+
+    local changed=0
+    local mss_value="92"
+    local mss_bulk_value="1200"
+
+    # Проверяем наличие строк (даже закомментированных)
+    local has_mss=$(grep -E '^[[:space:]]*#?[[:space:]]*client_mss[[:space:]]*=' "$CONFIG_TELEMT" | head -1)
+    local has_mss_bulk=$(grep -E '^[[:space:]]*#?[[:space:]]*mss_bulk[[:space:]]*=' "$CONFIG_TELEMT" | head -1)
+
+    # Раскомментируем и обновляем client_mss
+    if [ -n "$has_mss" ]; then
+        sed -i 's/^[[:space:]]*#[[:space:]]*client_mss[[:space:]]*=.*/client_mss = '"$mss_value"'/' "$CONFIG_TELEMT"
+        changed=1
+    else
+        # Добавляем в секцию server
+        if grep -q '^\[server\]' "$CONFIG_TELEMT"; then
+            sed -i '/^\[server\]/a client_mss = '"$mss_value"'' "$CONFIG_TELEMT"
+            changed=1
+        else
+            echo "" >> "$CONFIG_TELEMT"
+            echo "[server]" >> "$CONFIG_TELEMT"
+            echo "client_mss = $mss_value" >> "$CONFIG_TELEMT"
+            changed=1
+        fi
+    fi
+
+    # Раскомментируем и обновляем mss_bulk
+    if [ -n "$has_mss_bulk" ]; then
+        sed -i 's/^[[:space:]]*#[[:space:]]*mss_bulk[[:space:]]*=.*/mss_bulk = '"$mss_bulk_value"'/' "$CONFIG_TELEMT"
+        changed=1
+    else
+        # Добавляем в секцию server
+        if grep -q '^\[server\]' "$CONFIG_TELEMT"; then
+            sed -i '/^\[server\]/a mss_bulk = '"$mss_bulk_value"'' "$CONFIG_TELEMT"
+            changed=1
+        else
+            if ! grep -q '^\[server\]' "$CONFIG_TELEMT"; then
+                echo "" >> "$CONFIG_TELEMT"
+                echo "[server]" >> "$CONFIG_TELEMT"
+            fi
+            echo "mss_bulk = $mss_bulk_value" >> "$CONFIG_TELEMT"
+            changed=1
+        fi
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+        log_success "MSS (client_mss = $mss_value) и mss_bulk = $mss_bulk_value добавлены в конфиг"
+        
+        # Спрашиваем о перезапуске
+        echo ""
+        echo -en "  ${BOLD}${NC}Перезапустить telemt для применения изменений?${NC} ${GREEN}${BOLD}[Enter/Y - да, N - нет]:${NC} "
+        local restart_confirm
+        read -r restart_confirm
+        
+        if [[ -z "$restart_confirm" || "$restart_confirm" =~ ^[yY]$ ]]; then
+            if systemctl restart telemt 2>/dev/null; then
+                log_success "Telemt успешно перезапущен"
+            else
+                log_warning "Не удалось перезапустить telemt (возможно, он не установлен как служба)"
+            fi
+        else
+            log_info "Перезапуск отменён. Изменения применятся после перезапуска telemt"
+        fi
+    else
+        log_info "Не удалось добавить параметры client_mss и mss_bulk"
+    fi
+}
+
+# ── ОТКЛЮЧЕНИЕ MSS, MSS_BULK И SYN_LIMIT ───────────────────
 disable_bad_options() {
     if [ -z "$CONFIG_TELEMT" ] || [ ! -f "$CONFIG_TELEMT" ]; then
         log_error "Файл конфига не найден или не указан"
@@ -325,20 +418,25 @@ disable_bad_options() {
 
     local changed=0
 
-    if grep -E 'client_mss[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
-        sed -i '/client_mss[[:space:]]*=/s/^/#/' "$CONFIG_TELEMT"
+    if grep -E '^[[:space:]]*client_mss[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+        sed -i 's/^[[:space:]]*client_mss[[:space:]]*=.*/#client_mss = 0/' "$CONFIG_TELEMT"
         changed=1
     fi
 
-    if grep -E 'synlimit[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
-        sed -i '/synlimit[[:space:]]*=/s/^/#/' "$CONFIG_TELEMT"
+    if grep -E '^[[:space:]]*mss_bulk[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+        sed -i 's/^[[:space:]]*mss_bulk[[:space:]]*=.*/#mss_bulk = 0/' "$CONFIG_TELEMT"
+        changed=1
+    fi
+
+    if grep -E '^[[:space:]]*synlimit[[:space:]]*=' "$CONFIG_TELEMT" | grep -v '^#' | grep -q .; then
+        sed -i 's/^[[:space:]]*synlimit[[:space:]]*=.*/#synlimit = 0/' "$CONFIG_TELEMT"
         changed=1
     fi
 
     if [ "$changed" -eq 1 ]; then
-        log_success "MSS и synlimit отключены (строки закомментированы)"
+        log_success "MSS, mss_bulk и synlimit отключены (строки закомментированы)"
     else
-        log_info "Активные строки client_mss или synlimit не найдены"
+        log_info "Активные строки client_mss, mss_bulk или synlimit не найдены"
     fi
 }
 
@@ -676,12 +774,12 @@ SERVICE_UNIT_EOF
     fi
 }
 
-# ── Пункт 2: Отключение MSS и synlimit ─────────────────────
+# ── Пункт 2: Управление MSS, mss_bulk и synlimit ──────────
 apply_optimization() {
     if are_bad_options_enabled; then
         echo ""
-        log_info "Обнаружены активные строки с client_mss или synlimit в $CONFIG_TELEMT"
-        echo -en "  ${BOLD}Отключить их? [Y/n]:${NC} "
+        log_info "Обнаружены активные строки с client_mss, mss_bulk или synlimit в $CONFIG_TELEMT"
+        echo -en "  ${BOLD}${NC}Отключить mss, mss_bulk и synlimit в cfg telemt? [Y/n]:${NC} "
         local confirm
         read -r confirm
         if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
@@ -691,10 +789,18 @@ apply_optimization() {
         fi
     else
         echo ""
-        log_info "client_mss и synlimit уже отключены или отсутствуют в конфиге"
-        echo -e "  ${GRAY}Нажмите любую клавишу для возврата в меню...${NC}"
-        read -rsn1
+        log_info "client_mss, mss_bulk и synlimit уже отключены или отсутствуют в конфиге"
+        echo -en "  ${BOLD}]:${NC}Включить mss и mss_bulk в конфиге telemt? [Y/n]:${NC} "
+        local confirm
+        read -r confirm
+        if [[ -z "$confirm" || "$confirm" =~ ^[yY]$ ]]; then
+            enable_mss_options
+        else
+            log_info "Отмена"
+        fi
     fi
+    echo ""
+    read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
 }
 
 # ── Пункт 3: Базовая оптимизация ───────────────────────────
@@ -852,7 +958,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.19${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.22${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
@@ -970,18 +1076,28 @@ show_header() {
         echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC} человек"
 
         local mss_status=""
+        local mss_bulk_status=""
         local synlimit_status=""
+        
         if is_mss_enabled; then
             mss_status="${RED}включен${NC}"
         else
             mss_status="${GREEN}отключен${NC}"
         fi
+        
+        if is_mss_bulk_enabled; then
+            mss_bulk_status="${RED}включен${NC}"
+        else
+            mss_bulk_status="${GREEN}отключен${NC}"
+        fi
+        
         if is_synlimit_enabled; then
             synlimit_status="${RED}включен${NC}"
         else
             synlimit_status="${GREEN}отключен${NC}"
         fi
-        echo -e "  ${BOLD}Встроенный MSS:${NC} $mss_status  |  ${BOLD}Встроенный synlimit:${NC} $synlimit_status"
+        
+        echo -e "  ${BOLD}Встроенный MSS:${NC} $mss_status  |  ${BOLD}MSS_BULK:${NC} $mss_bulk_status  |  ${BOLD}Synlimit:${NC} $synlimit_status"
     fi
 
     if [ "$mtprotozig_installed" = true ]; then
@@ -1040,9 +1156,9 @@ main_menu() {
         fi
 
         if are_bad_options_enabled; then
-            local item2="${CYAN}Отключить встроенные MSS и synlimit${NC}"
+            local item2="${NC}${BOLD}Отключить mss, mss_bulk и synlimit в cfg telemt${NC}"
         else
-            local item2="${GRAY}Отключить встроенные MSS и synlimit (уже отключены)${NC}"
+            local item2="${NC}${BOLD}Включить mss и mss_bulk в конфиге telemt${NC}"
         fi
 
         echo -e "  ${CYAN}[1]${NC}  $item1"
@@ -1097,13 +1213,9 @@ main_menu() {
             ;;
         2)
             echo ""
-            if are_bad_options_enabled; then
-                apply_optimization
-            else
-                log_info "MSS и synlimit уже отключены"
-                echo ""
-                read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
-            fi
+            apply_optimization
+            echo ""
+            read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
             ;;
         3)
             echo ""
