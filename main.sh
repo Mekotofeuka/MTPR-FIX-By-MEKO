@@ -220,12 +220,14 @@ install_syn_fix() {
     local port
     local auto_install=false
     local forced_port=""
+    local fix_choice=""
 
     # Проверяем аргумент -auto_install
     if [[ "$1" == "-auto_install" ]]; then
         auto_install=true
         forced_port="$2"
-        log_info "Авто-установка SYN FIX"
+        # В авто-режиме всегда ставим новый вариант
+        FIX_TYPE="new"
     fi
 
     ssh_port=$(get_ssh_port)
@@ -251,6 +253,26 @@ install_syn_fix() {
             log_error "Некорректный порт, используем 443"
             port="443"
         fi
+
+        # ── ВЫБОР ТИПА ФИКСА ──────────────────────────────────
+        echo ""
+        echo -e "  ${BOLD}Выберите тип SYN FIX:${NC}"
+        echo -e "  ${GREEN}[1]${NC}  ${BOLD}Новый вариант${NC} (u32 + ACCEPT без лимита) — ${GREEN}рекомендуется${NC}"
+        echo -e "  ${CYAN}[2]${NC}  ${BOLD}Старый вариант${NC} (TTL+Length + ACCEPT без лимита)"
+        echo ""
+        echo -en "  ${BOLD}Выбор [1/2, Enter = 1]:${NC} "
+        read -r fix_choice
+
+        if [ -z "$fix_choice" ] || [ "$fix_choice" = "1" ]; then
+            FIX_TYPE="new"
+            log_info "Выбран новый вариант фикса"
+        elif [ "$fix_choice" = "2" ]; then
+            FIX_TYPE="old"
+            log_info "Выбран старый вариант фикса"
+        else
+            log_warning "Неверный выбор, используем новый вариант"
+            FIX_TYPE="new"
+        fi
     fi
 
     # ── ПОДТВЕРЖДЕНИЕ ПЕРЕД УСТАНОВКОЙ ──────────────────────
@@ -260,7 +282,7 @@ install_syn_fix() {
         echo ""
         echo -e "  ${BOLD}Что будет сделано:${NC}"
         echo -e "  • Создана отдельная цепочка iptables ${CYAN}$SYNFIX_CHAIN${NC} для порта ${CYAN}$port${NC}"
-        echo -e "  • Добавлены ${CYAN}4 правила${NC} SYN-фильтрации в эту цепочку"
+        echo -e "  • Добавлены правила SYN-фильтрации в эту цепочку"
         echo -e "  • Вы сможете удалить данную настройку через меню скрипта."
         echo ""
         log_warning "${BOLD}ВНИМАНИЕ:${NC} Данная настройка изменит файрвол системы."
@@ -280,7 +302,7 @@ install_syn_fix() {
     save_port "$port"
 
     # ── Генерируем и запускаем скрипт применения правил ─────────
-    generate_apply_script
+    generate_apply_script "$FIX_TYPE"
     generate_service_unit
     systemctl daemon-reload
     PORT="$port" /opt/mtpr-simple/apply-mtpr-synfix.sh
@@ -378,7 +400,10 @@ restart_syn_fix_service() {
 
 # ── Генерация скрипта применения правил ──────────────────────────
 generate_apply_script() {
-    cat >/opt/mtpr-simple/apply-mtpr-synfix.sh <<'APPLY_SCRIPT_EOF'
+    local fix_type="${1:-new}"
+
+    if [ "$fix_type" = "old" ]; then
+        cat >/opt/mtpr-simple/apply-mtpr-synfix.sh <<'APPLY_SCRIPT_EOF'
 #!/bin/bash
 set -e
 
@@ -406,25 +431,14 @@ if ! iptables -t filter -C INPUT -j "$CHAIN" 2>/dev/null; then
     echo "Цепочка $CHAIN подключена к INPUT"
 fi
 
+# ── 1. iOS — проверка TTL+Length, ACCEPT БЕЗ ЛИМИТА ────────
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     -m tcp --tcp-flags SYN SYN \
     -m length --length 64 \
     -m ttl --ttl-lt 65 \
-    -m hashlimit \
-    --hashlimit-name ios_"$PORT" \
-    --hashlimit-mode srcip \
-    --hashlimit-upto 15/second \
-    --hashlimit-burst 30 \
-    --hashlimit-htable-expire 60000 \
-    --hashlimit-htable-size 32768 \
     -j ACCEPT
 
-iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
-    -m tcp --tcp-flags SYN SYN \
-    -m length --length 64 \
-    -m ttl --ttl-lt 65 \
-    -j REJECT --reject-with tcp-reset
-
+# ── 2. ВТОРОЙ СЛОЙ — все остальные (Android/Desktop) → hashlimit 54/мин ──
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     -m hashlimit \
     --hashlimit-name mtproto_"$PORT" \
@@ -435,13 +449,71 @@ iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     --hashlimit-htable-size 32768 \
     -j ACCEPT
 
+# ── 3. REJECT ────────────────────────
 iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
     -j REJECT --reject-with tcp-reset
 
-# Если ни одно правило не сработало — возвращаем пакет обратно в INPUT
+#обратно в INPUT
 iptables -t filter -A "$CHAIN" -j RETURN
 
 APPLY_SCRIPT_EOF
+    else
+        # Новый вариант (по умолчанию) — iOS ACCEPT без лимита
+        cat >/opt/mtpr-simple/apply-mtpr-synfix.sh <<'APPLY_SCRIPT_EOF'
+#!/bin/bash
+set -e
+
+PORT="${PORT:-$(cat /opt/mtpr-simple/port 2>/dev/null)}"
+
+if [ -z "$PORT" ]; then
+    echo "SYN FIX: Порт не указан, выход" >&2
+    exit 1
+fi
+
+CHAIN="MTPR_SYNFIX"
+
+SSH_PORT=$(sshd -T 2>/dev/null | grep '^port ' | awk '{print $2}' || echo 22)
+
+if ! iptables -C INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT 1 -p tcp --dport "$SSH_PORT" -j ACCEPT
+    echo "SSH-доступ (${SSH_PORT}) разрешён"
+fi
+
+iptables -t filter -N "$CHAIN" 2>/dev/null || true
+iptables -t filter -F "$CHAIN"
+
+if ! iptables -t filter -C INPUT -j "$CHAIN" 2>/dev/null; then
+    iptables -t filter -I INPUT 2 -j "$CHAIN"
+    echo "Цепочка $CHAIN подключена к INPUT"
+fi
+
+# ── 1. Маркировка iOS в mangle ──────────────────────────────
+iptables -t mangle -A PREROUTING -m u32 --u32 "32 & 0x00FFFFFF = 0x0002FFFF && 40 & 0xFF000000 = 0x02000000 && 44 & 0xFFFF0000 = 0x01030000 && 48 & 0xFFFFFF00 = 0x01010800 && 60 & 0xFFFFFFFF = 0x04020000" -j MARK --set-mark 0x400
+
+# ── 2. ACCEPT для маркированных iOS (БЕЗ ЛИМИТА) ─────────────
+iptables -t filter -A "$CHAIN" -m mark --mark 0x400 -j ACCEPT
+
+# ── 3. ВТОРОЙ СЛОЙ — все остальные (Android/Desktop) → hashlimit 54/мин ──
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -m hashlimit \
+    --hashlimit-name mtproto_"$PORT" \
+    --hashlimit-mode srcip \
+    --hashlimit-upto 54/minute \
+    --hashlimit-burst 1 \
+    --hashlimit-htable-expire 60000 \
+    --hashlimit-htable-size 32768 \
+    -j ACCEPT
+
+# ── 4. REJECT ────────────────────────
+iptables -t filter -A "$CHAIN" -p tcp --dport "$PORT" --syn \
+    -j REJECT --reject-with tcp-reset
+
+#обратно в INPUT
+iptables -t filter -A "$CHAIN" -j RETURN
+
+APPLY_SCRIPT_EOF
+    fi
+
     chmod +x /opt/mtpr-simple/apply-mtpr-synfix.sh
 }
 
@@ -657,7 +729,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v0.9${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.06${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
