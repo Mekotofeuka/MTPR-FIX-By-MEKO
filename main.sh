@@ -668,9 +668,133 @@ clear_screen() {
     clear 2>/dev/null || printf '\033[2J\033[H'
 }
 
-# ── Функция проверки установки Telemt ──────────────────────
+# ── Функция определения Telemt (из реаниматора) ────────────
+_is_excluded_path() {
+    local _path="$1"
+    case "$_path" in
+        *telemt-panel*|*telemt_panel*) return 0 ;;
+    esac
+    return 1
+}
+
+_looks_like_telemt_config() {
+    local _file="$1"
+    [ -f "$_file" ] || return 1
+    grep -qE '^\[access\.users\]|^\[censorship\]|^\[general\.modes\]|^tls_domain[[:space:]]*=' "$_file" 2>/dev/null
+}
+
+detect_telemt_advanced() {
+    local found_version=""
+    local found_config=""
+    local found_port=""
+
+    # 1. Проверяем версию через команду telemт
+    if command -v telemt >/dev/null 2>&1; then
+        found_version=$(telemt --version 2>/dev/null | head -1 | awk '{print $2}')
+        if [ -n "$found_version" ]; then
+            log_success "Telemt найден, версия: $found_version"
+            is_telemt_installed=true
+            TELEMT_VERSION="$found_version"
+        else
+            log_warning "telemt --version не дал результата"
+            is_telemt_installed=false
+            TELEMT_VERSION=""
+        fi
+    else
+        log_warning "Команда telemt не найдена"
+        is_telemt_installed=false
+        TELEMT_VERSION=""
+    fi
+
+    # Если telemt не найден — выходим
+    if [ "$is_telemt_installed" = false ]; then
+        TELEMT_CONFIG_PATH=""
+        TELEMT_PORT=""
+        return 1
+    fi
+
+    # 2. Ищем конфиг
+    # Сначала проверяем сохранённый путь
+    if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ] && ! _is_excluded_path "$CONFIG_TELEMT" && _looks_like_telemt_config "$CONFIG_TELEMT"; then
+        found_config="$CONFIG_TELEMT"
+        log_info "Конфиг найден по сохранённому пути: $found_config"
+    fi
+
+    # Если не нашли — ищем в стандартных местах (как в реаниматоре)
+    if [ -z "$found_config" ]; then
+        local config_candidates=(
+            "/etc/telemt/telemt.toml"
+            "/etc/telemt/config.toml"
+            "/etc/telemt.toml"
+            "/opt/telemt/config.toml"
+            "/opt/telemt/telemt.toml"
+        )
+        for cfg in "${config_candidates[@]}"; do
+            if [ -f "$cfg" ] && ! _is_excluded_path "$cfg" && _looks_like_telemt_config "$cfg"; then
+                found_config="$cfg"
+                log_info "Конфиг найден в стандартном месте: $found_config"
+                break
+            fi
+        done
+    fi
+
+    # Если всё равно не нашли — пытаемся определить через процесс (как в реаниматоре)
+    if [ -z "$found_config" ]; then
+        if pgrep -x telemt >/dev/null 2>&1 || systemctl is-active telemt.service >/dev/null 2>&1; then
+            local args=$(ps -eo args 2>/dev/null | grep '[t]elemt' | grep -v 'telemt-panel' | grep -v 'telemt_panel' | head -1 | grep -oE '/[^ ]+\.toml' | head -1)
+            if [ -n "$args" ] && [ -f "$args" ] && ! _is_excluded_path "$args" && _looks_like_telemt_config "$args"; then
+                found_config="$args"
+                log_info "Конфиг определён через процесс: $found_config"
+            fi
+        fi
+    fi
+
+    # Сохраняем найденный конфиг
+    if [ -n "$found_config" ]; then
+        TELEMT_CONFIG_PATH="$found_config"
+        # Сохраняем путь в наш файл, чтобы использовать в будущем
+        mkdir -p /opt/mtpr-simple
+        echo "$found_config" > "$CONFIG_PATH_FILE"
+        CONFIG_TELEMT="$found_config"
+
+        # 3. Парсим порт из конфига
+        local port=$(grep -E '^port[[:space:]]*=' "$found_config" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            TELEMT_PORT="$port"
+            log_info "Порт из конфига: $TELEMT_PORT"
+            # Сохраняем порт для использования в фиксе
+            save_port "$port"
+        else
+            # Пробуем определить порт через ss (как в реаниматоре)
+            local detected_port=$(ss -tlnp 2>/dev/null | grep telemt | grep -oP ':\K[0-9]+' | head -1)
+            if [[ -n "$detected_port" ]]; then
+                TELEMT_PORT="$detected_port"
+                log_info "Порт определён через ss: $TELEMT_PORT"
+                save_port "$detected_port"
+            else
+                TELEMT_PORT="443"
+                log_warning "Порт не определён, используем 443"
+            fi
+        fi
+        return 0
+    else
+        TELEMT_CONFIG_PATH=""
+        TELEMT_PORT=""
+        log_warning "Конфиг Telemt не найден"
+        return 1
+    fi
+}
+
+# ── Функция проверки установки Telemt (простая, для совместимости) ──
 is_telemt_installed() {
-    command -v telemt >/dev/null 2>&1
+    if [ -n "$TELEMT_VERSION" ]; then
+        return 0
+    fi
+    # Если версия не определена, проверяем через команду
+    if command -v telemt >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
 }
 
 is_mtprotozig_installed() {
@@ -678,7 +802,9 @@ is_mtprotozig_installed() {
 }
 
 get_telemt_version() {
-    if command -v telemt >/dev/null 2>&1; then
+    if [ -n "$TELEMT_VERSION" ]; then
+        echo "$TELEMT_VERSION"
+    elif command -v telemt >/dev/null 2>&1; then
         telemt --version 2>/dev/null | head -1 | awk '{print $2}'
     else
         echo ""
@@ -703,7 +829,9 @@ get_mtprotozig_online() {
 
 get_online_count() {
     local port="443"
-    if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
+    if [ -n "$TELEMT_PORT" ]; then
+        port="$TELEMT_PORT"
+    elif [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
         local config_port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
         if [[ "$config_port" =~ ^[0-9]+$ ]]; then
             port="$config_port"
@@ -715,22 +843,11 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.10${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.11${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
-    if [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ] && pgrep -x telemt >/dev/null 2>&1; then
-        local current_port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-        if [[ "$current_port" =~ ^[0-9]+$ ]]; then
-            save_port "$current_port"
-        else
-            local detected_port=$(ss -tlnp 2>/dev/null | grep telemt | grep -oP ':\K[0-9]+' | head -1)
-            if [[ -n "$detected_port" ]]; then
-                save_port "$detected_port"
-            fi
-        fi
-    fi
-
+    # Определяем статус SYN FIX
     local synfix_status=$(get_synfix_status)
     if [ "$synfix_status" = "active" ]; then
         echo -e "  ${BOLD}SYN FIX:${NC} ${GREEN}Установлен${NC}"
@@ -740,6 +857,7 @@ show_header() {
         echo -e "  ${BOLD}SYN FIX:${NC} ${RED}${BOLD}Не установлен${NC}"
     fi
 
+    # Проверяем установку Telemt через расширенную функцию
     local telemt_installed=false
     local mtprotozig_installed=false
     
@@ -750,6 +868,7 @@ show_header() {
         mtprotozig_installed=true
     fi
 
+    # Формируем статусную строку
     local status_line=""
     if [ "$telemt_installed" = true ] && [ "$mtprotozig_installed" = true ]; then
         status_line="Telemt: ${GREEN}установлен${NC}${BOLD} | Mtproto.zig: ${GREEN}установлен${NC}"
@@ -762,24 +881,31 @@ show_header() {
     fi
     echo -e "  ${BOLD}${status_line}${NC}"
 
+    # Если установлен Telemt - показываем детали
     if [ "$telemt_installed" = true ]; then
         local port_display=""
-        local saved_port=$(get_saved_port)
-        
-        if [ -n "$saved_port" ] && [[ "$saved_port" =~ ^[0-9]+$ ]]; then
-            port_display=" (порт $saved_port)"
-        elif [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
-            local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-            if [[ "$port" =~ ^[0-9]+$ ]]; then
-                port_display=" (порт $port)"
-                save_port "$port"
-            else
-                port_display="${NC}${BOLD} (порт не определён)"
-            fi
+        # Используем порт из TELEMT_PORT, если он определён
+        if [ -n "$TELEMT_PORT" ]; then
+            port_display=" (порт $TELEMT_PORT)"
         else
-            port_display=" (порт не определён)"
+            # Пробуем получить порт из сохранённого файла
+            local saved_port=$(get_saved_port)
+            if [ -n "$saved_port" ] && [[ "$saved_port" =~ ^[0-9]+$ ]]; then
+                port_display=" (порт $saved_port)"
+            elif [ -n "$CONFIG_TELEMT" ] && [ -f "$CONFIG_TELEMT" ]; then
+                local port=$(grep -E '^port[[:space:]]*=' "$CONFIG_TELEMT" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+                if [[ "$port" =~ ^[0-9]+$ ]]; then
+                    port_display=" (порт $port)"
+                    save_port "$port"
+                else
+                    port_display="${NC}${BOLD} (порт не определён)"
+                fi
+            else
+                port_display=" (порт не определён)"
+            fi
         fi
 
+        # Получаем версию Telemt
         local telemt_version=$(get_telemt_version)
         local version_color=""
         if [ -n "$telemt_version" ]; then
@@ -795,12 +921,14 @@ show_header() {
             version_display="${RED}не определена${NC}"
         fi
 
+        # Получаем количество уникальных IP
         local online_count=$(get_telemt_online)
 
         echo -e "  ${BOLD}Telemt:${NC} ${GREEN}Установлен${NC}${port_display}"
         echo -e "  ${BOLD}Версия Telemt:${NC} $version_display"
         echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC} человек"
 
+        # Статус MSS и synlimit
         local mss_status=""
         local synlimit_status=""
         if is_mss_enabled; then
@@ -816,6 +944,7 @@ show_header() {
         echo -e "  ${BOLD}Встроенный MSS:${NC} $mss_status  |  ${BOLD}Встроенный synlimit:${NC} $synlimit_status"
     fi
 
+    # Если установлен MTProtoZig - показываем онлайн
     if [ "$mtprotozig_installed" = true ]; then
         local online_count=$(get_mtprotozig_online)
         if [ -n "$online_count" ] && [ "$online_count" -ge 0 ] 2>/dev/null; then
@@ -828,6 +957,7 @@ show_header() {
     echo ""
 }
 
+# ── Функция для открытия подменю прокси ─────────────────────
 open_proxy_menu() {
     local PROXY_MENU_SCRIPT="/opt/mtpr-simple/proxys/proxymenu.sh"
     if [ -f "$PROXY_MENU_SCRIPT" ]; then
@@ -849,6 +979,11 @@ main_menu() {
         install_syn_fix -auto_install "$forced_port"
         echo ""
         read -rsn1 -p "  Нажмите любую клавишу для возврата в меню..."
+    fi
+
+    # При первом запуске определяем Telemt
+    if [ -z "$TELEMT_VERSION" ] && [ -z "$TELEMT_CONFIG_PATH" ]; then
+        detect_telemt_advanced
     fi
 
     while true; do
@@ -1028,4 +1163,4 @@ update_script() {
 }
 
 # ── Запуск ────────────────────────────────────────────────────
-main_menu "$@"
+main_menu "$@" 
