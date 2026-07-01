@@ -15,6 +15,19 @@ NC='\033[0m'
 # ── Файл для сохранения пути к конфигу (используем общий с main.sh) ──
 CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
 
+# ── Функция получения текущего пути к конфигу ──────────────
+get_config_path() {
+    if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
+        path=$(cat "$CONFIG_PATH_FILE")
+        if [ "$path" != "skip" ]; then
+            echo "$path"
+            return 0
+        fi
+    fi
+    echo "/etc/telemt/telemt.toml"
+    return 0
+}
+
 # ── Функции для работы с TOML ──────────────────────────────
 _toml_get_value() {
     local _key="$1" _file="$2"
@@ -106,41 +119,6 @@ get_public_ip() {
     echo "$_ip"
 }
 
-# ── Функция генерации секрета для ссылки ─────────────────────
-generate_secret() {
-    local secret="$1"
-    local tls_domain="$2"
-    local mode="$3"  # classic, secure, tls
-    
-    local result=""
-    
-    case "$mode" in
-        classic)
-            result="$secret"
-            ;;
-        secure)
-            result="ee${secret}"
-            ;;
-        tls)
-            if [ -n "$tls_domain" ]; then
-                local hex_domain=$(echo -n "$tls_domain" | xxd -p -c 256 2>/dev/null)
-                if [ -n "$hex_domain" ]; then
-                    result="ee${secret}${hex_domain}"
-                else
-                    result="ee${secret}"
-                fi
-            else
-                result="ee${secret}"
-            fi
-            ;;
-        *)
-            result="$secret"
-            ;;
-    esac
-    
-    echo "$result"
-}
-
 # ── Функция формирования ссылок для подключения ─────────────
 generate_proxy_links() {
     local config_path=$(get_config_path)
@@ -169,7 +147,7 @@ generate_proxy_links() {
     if [ -n "$detected_port" ]; then
         port="$detected_port"
     else
-        port=$(get_telemt_ports | head -1)
+        port=$(grep -E '^port[[:space:]]*=' "$config_path" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
     fi
     if [ -z "$port" ]; then
         port="443"
@@ -216,7 +194,6 @@ generate_proxy_links() {
         if [ -n "$detected_tls_domain" ]; then
             tls_enabled=true
         else
-            # Если ничего не включено — используем classic как дефолт
             classic_enabled=true
         fi
     fi
@@ -520,7 +497,7 @@ restart_telemt() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}Telemt меню v0.5${NC}"
+    echo -e "  ${BOLD}Telemt меню v0.51${NC}"
     echo -e "  ${DIM}===========================${NC}"
     
     # Показываем информацию о Telemt, если установлен
@@ -550,7 +527,7 @@ while true; do
         if [ -n "$links" ]; then
             echo ""
             echo -e "  ${BOLD}Ссылки для подключения:${NC}"
-            echo -e "  $links"
+            echo -e "$links"
         fi
         
         # Онлайн
