@@ -254,7 +254,7 @@ find_user_link() {
     echo ""
     echo -e "  ${BOLD}Поиск пользователя для генерации ссылки${NC}"
     echo -e "  ${DIM}Введите имя пользователя (или его часть)${NC}"
-    echo -e "  ${DIM}Например: hello, user1, test и т.д.${NC}"
+    echo -e "  ${DIM}Например: hello, hel, user1, test и т.д.${NC}"
     echo ""
     echo -en "  ${BOLD}Ввод:${NC} "
     read -r search_query
@@ -316,7 +316,7 @@ find_user_link() {
     echo ""
     echo -e "  ${GREEN}✓${NC} Найден пользователь: ${BOLD}${user_name}${NC}"
     echo ""
-    echo -en "  ${BOLD}Вывести ссылку для этого пользователя? [Enter/Y - да, N - нет]:${NC} "
+    echo -en "  ${NC}${BOLD}Вывести ссылку для этого пользователя?${GREEN}${BOLD} Enter${NC}${BOLD} -${GREEN}${BOLD} да${NC}${BOLD}, ${RED}${BOLD}n${NC}${BOLD} - ${RED}${BOLD}назад${NC}${BOLD}:${NC} "
     local confirm
     read -r confirm
     
@@ -696,7 +696,7 @@ restart_telemt() {
 while true; do
     clear
     echo ""
-    echo -e "  ${BOLD}Telemt меню v0.54${NC}"
+    echo -e "  ${BOLD}Telemt меню v0.57${NC}"
     echo -e "  ${DIM}===========================${NC}"
     
     # Показываем информацию о Telemt, если установлен
@@ -737,7 +737,7 @@ while true; do
     echo -e "  ${CYAN}[3]${NC}  ${BOLD}Перезапустить Telemt${NC}"
     echo -e "  ${CYAN}[4]${NC}  ${BOLD}Обновить путь к конфигу Telemt${NC}"
     echo -e "  ${CYAN}[5]${NC}  ${BOLD}Посмотреть логи Telemt${NC}"
-    echo -e "  ${CYAN}[6]${NC}  ${BOLD}Найти пользователя и показать ссылку${NC}"
+    echo -e "  ${CYAN}[6]${NC}  ${BOLD}Вывести ссылку на подключение для пользователя${NC}"
     echo -e "  ${RED}[7]${NC}  ${BOLD}Удалить Telemt${NC}"
     echo -e "  ${CYAN}[0]${NC}  ${BOLD}Назад в прокси меню${NC}"
     echo ""
