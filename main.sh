@@ -78,45 +78,111 @@ get_telemt_version() {
     fi
 }
 
-# ── Расширенное обнаружение Telemt ──────────
-detect_telemt_advanced() {
-    local DETECTED_CONFIG_PATH=""
-    local DETECTED_PORT=""
+# ── Расширенное обнаружение Telemt (возвращает ВСЕ конфиги) ──
+detect_all_telemt_configs() {
+    local FOUND_CONFIGS=""
+    local SEEN_PATHS=""
     
-    # 1. Локальный процесс telemt
+    # 1. Смотрим запущенные процессы telemt
     if pgrep -x telemt &>/dev/null || systemctl is-active telemt.service &>/dev/null 2>&1; then
-        local _args
-        _args=$(ps -eo args 2>/dev/null | grep '[t]elemt' | grep -v 'telemt-panel' | grep -v 'telemt_panel' | head -1 | grep -oE '/[^ ]+\.toml' | head -1)
-        if [ -n "$_args" ] && [ -f "$_args" ] && ! _is_excluded_path "$_args" && _looks_like_telemt_config "$_args"; then
-            DETECTED_CONFIG_PATH="$_args"
-        fi
-    fi
-    
-    # 2. Поиск конфига в стандартных местах
-    if [ -z "$DETECTED_CONFIG_PATH" ]; then
-        local _cf
-        for _cf in /etc/telemt/telemt.toml /etc/telemt/config.toml /etc/telemt.toml /opt/telemt/config.toml /opt/telemt/telemt.toml; do
-            if [ -f "$_cf" ] && ! _is_excluded_path "$_cf" && _looks_like_telemt_config "$_cf"; then
-                DETECTED_CONFIG_PATH="$_cf"
-                break
+        local _args_list
+        _args_list=$(ps -eo args 2>/dev/null | grep '[t]elemt' | grep -v 'telemt-panel' | grep -v 'telemt_panel' | grep -oE '/[^ ]+\.toml' | sort -u)
+        for _arg in $_args_list; do
+            if [ -f "$_arg" ] && ! _is_excluded_path "$_arg" && _looks_like_telemt_config "$_arg"; then
+                if ! echo "$SEEN_PATHS" | grep -q "$_arg"; then
+                    SEEN_PATHS="${SEEN_PATHS}${_arg}\n"
+                    FOUND_CONFIGS="${FOUND_CONFIGS}${_arg}:"
+                fi
             fi
         done
     fi
     
+    # 2. Поиск конфигов в стандартных местах
+    local _cf
+    for _cf in /etc/telemt/telemt.toml /etc/telemt/config.toml /etc/telemt.toml /opt/telemt/config.toml /opt/telemt/telemt.toml; do
+        if [ -f "$_cf" ] && ! _is_excluded_path "$_cf" && _looks_like_telemt_config "$_cf"; then
+            if ! echo "$SEEN_PATHS" | grep -q "$_cf"; then
+                SEEN_PATHS="${SEEN_PATHS}${_cf}\n"
+                FOUND_CONFIGS="${FOUND_CONFIGS}${_cf}:"
+            fi
+        fi
+    done
+    
     # 3. Проверяем сохранённый путь
-    if [ -z "$DETECTED_CONFIG_PATH" ] && [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
+    if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
         local _saved_path=$(cat "$CONFIG_PATH_FILE")
         if [ "$_saved_path" != "skip" ] && [ -f "$_saved_path" ] && _looks_like_telemt_config "$_saved_path"; then
-            DETECTED_CONFIG_PATH="$_saved_path"
+            if ! echo "$SEEN_PATHS" | grep -q "$_saved_path"; then
+                SEEN_PATHS="${SEEN_PATHS}${_saved_path}\n"
+                FOUND_CONFIGS="${FOUND_CONFIGS}${_saved_path}:"
+            fi
         fi
     fi
     
-    # 4. Получаем порт из конфига
-    if [ -n "$DETECTED_CONFIG_PATH" ] && [ -f "$DETECTED_CONFIG_PATH" ]; then
-        DETECTED_PORT=$(_toml_get_value "port" "$DETECTED_CONFIG_PATH")
-    fi
+    # Убираем последнее двоеточие
+    FOUND_CONFIGS="${FOUND_CONFIGS%:}"
     
-    echo "$DETECTED_CONFIG_PATH:$DETECTED_PORT"
+    echo "$FOUND_CONFIGS"
+}
+
+# ── Функция получения порта из конфига ──────────────────────
+get_port_from_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        echo ""
+        return 1
+    fi
+    _toml_get_value "port" "$_cfg"
+}
+
+# ── Функция получения онлайна для конкретного конфига ────────
+get_telemt_online_for_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        echo ""
+        return 1
+    fi
+    local _port=$(get_port_from_config "$_cfg")
+    if [ -z "$_port" ]; then
+        echo ""
+        return 1
+    fi
+    # Пробуем через API (если порт API 9091 или вычисляем)
+    curl -s "http://127.0.0.1:9091/v1/stats/users/active-ips" 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' '
+}
+
+# ── Проверка MSS в конкретном конфиге ──────────────────────
+is_mss_enabled_for_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        return 1
+    fi
+    if grep -E '^[[:space:]]*client_mss[[:space:]]*=' "$_cfg" | grep -v '^#' | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+is_mss_bulk_enabled_for_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        return 1
+    fi
+    if grep -E '^[[:space:]]*mss_bulk[[:space:]]*=' "$_cfg" | grep -v '^#' | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+is_synlimit_enabled_for_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        return 1
+    fi
+    if grep -E '^[[:space:]]*synlimit[[:space:]]*=' "$_cfg" | grep -v '^#' | grep -q .; then
+        return 0
+    fi
+    return 1
 }
 
 # ── Проверяем, сохранён ли путь к конфигу ──────────────────
@@ -134,10 +200,9 @@ else
     echo -e "  ${NC}${BOLD}По умолчанию: ${GREEN}${BOLD}[/etc/telemt/telemt.toml]${NC}"
     
     if [ -n "$TELEMT_VERSION" ]; then
-        # Telemt найден — ищем конфиг
-        _detected_info=$(detect_telemt_advanced)
-        _detected_path="${_detected_info%:*}"
-        _detected_port="${_detected_info#*:}"
+        # Telemt найден — ищем конфиги
+        _detected_configs=$(detect_all_telemt_configs)
+        _detected_path=$(echo "$_detected_configs" | cut -d':' -f1)
         
         if [ -n "$_detected_path" ] && [ -f "$_detected_path" ]; then
             echo -e "  ${NC}${BOLD}Телемт найден по пути: ${GREEN}${BOLD}${_detected_path}${NC}"
@@ -162,8 +227,8 @@ else
     else
         if [ -z "$CONFIG_TELEMT_INPUT" ]; then
             # Если Enter — пробуем определить автоматически
-            _detected_info=$(detect_telemt_advanced)
-            _detected_path="${_detected_info%:*}"
+            _detected_configs=$(detect_all_telemt_configs)
+            _detected_path=$(echo "$_detected_configs" | cut -d':' -f1)
             
             if [ -n "$_detected_path" ] && [ -f "$_detected_path" ]; then
                 CONFIG_TELEMT_INPUT="$_detected_path"
@@ -928,11 +993,19 @@ get_telemt_version() {
     fi
 }
 
-get_telemt_online() {
-    if is_telemt_installed; then
-        curl -s http://127.0.0.1:9091/v1/stats/users/active-ips 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' '
+# ── Функция получения онлайна Telemt для конфига ────────────
+get_telemt_online_for_config() {
+    local _cfg="$1"
+    if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
+        echo "0"
+        return 1
+    fi
+    # Пробуем через API
+    local _online=$(curl -s "http://127.0.0.1:9091/v1/stats/users/active-ips" 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' ')
+    if [ -z "$_online" ] || [ "$_online" -lt 0 ] 2>/dev/null; then
+        echo "0"
     else
-        echo ""
+        echo "$_online"
     fi
 }
 
@@ -958,60 +1031,44 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.31${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.34${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
-    # ── ОПРЕДЕЛЯЕМ ПОРТ КАЖДЫЙ РАЗ ──────────────────────────
-    local current_port=""
-    local config_path=""
+    # ── ПЕРЕЧИТЫВАЕМ ПУТЬ К КОНФИГУ КАЖДЫЙ РАЗ ──────────────
+    local current_config_path=""
     
-    # Проверяем, есть ли сохранённый путь
+    # 1. Сначала проверяем сохранённый путь
     if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
-        config_path=$(cat "$CONFIG_PATH_FILE")
-        if [ "$config_path" = "skip" ]; then
-            config_path=""
+        local _saved=$(cat "$CONFIG_PATH_FILE")
+        if [ "$_saved" != "skip" ] && [ -n "$_saved" ]; then
+            current_config_path="$_saved"
         fi
     fi
     
-    # Если сохранённого пути нет, используем тот что в CONFIG_TELEMT
-    if [ -z "$config_path" ] && [ -n "$CONFIG_TELEMT" ] && [ "$CONFIG_TELEMT" != "skip" ]; then
-        config_path="$CONFIG_TELEMT"
+    # 2. Если сохранённого нет — используем CONFIG_TELEMT
+    if [ -z "$current_config_path" ] && [ -n "$CONFIG_TELEMT" ] && [ "$CONFIG_TELEMT" != "skip" ]; then
+        current_config_path="$CONFIG_TELEMT"
     fi
     
-    # Если есть путь и файл существует — берём порт из него
-    if [ -n "$config_path" ] && [ -f "$config_path" ]; then
-        current_port=$(grep -E '^port[[:space:]]*=' "$config_path" | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
-        if [[ "$current_port" =~ ^[0-9]+$ ]]; then
-            save_port "$current_port"
+    # 3. Если путь есть, но файла нет — пробуем найти через detect
+    if [ -n "$current_config_path" ] && [ ! -f "$current_config_path" ]; then
+        local _detected=$(detect_all_telemt_configs)
+        local _first=$(echo "$_detected" | cut -d':' -f1)
+        if [ -n "$_first" ] && [ -f "$_first" ]; then
+            current_config_path="$_first"
+            # Обновляем сохранённый путь
+            echo "$_first" > "$CONFIG_PATH_FILE"
+            CONFIG_TELEMT="$_first"
         fi
     fi
+
+    # ── ПОЛУЧАЕМ ВСЕ КОНФИГИ TELEMT ──────────────────────────
+    local all_configs=$(detect_all_telemt_configs)
+    local configs_array=()
     
-    # Если порт не определился через конфиг — пробуем через detect_telemt_advanced
-    if [ -z "$current_port" ] || ! [[ "$current_port" =~ ^[0-9]+$ ]]; then
-        local detected_info=$(detect_telemt_advanced)
-        local detected_path="${detected_info%:*}"
-        local detected_port="${detected_info#*:}"
-        
-        if [ -n "$detected_port" ] && [[ "$detected_port" =~ ^[0-9]+$ ]]; then
-            current_port="$detected_port"
-            save_port "$current_port"
-            # Если нашелся конфиг через detect, обновляем CONFIG_TELEMT
-            if [ -n "$detected_path" ] && [ -f "$detected_path" ]; then
-                CONFIG_TELEMT="$detected_path"
-                mkdir -p /opt/mtpr-simple
-                echo "$detected_path" > "$CONFIG_PATH_FILE"
-            fi
-        fi
-    fi
-    
-    # Если всё ещё нет порта — пробуем через ss
-    if [ -z "$current_port" ] || ! [[ "$current_port" =~ ^[0-9]+$ ]]; then
-        local detected_port=$(ss -tlnp 2>/dev/null | grep telemt | grep -oP ':\K[0-9]+' | head -1)
-        if [[ -n "$detected_port" ]] && [[ "$detected_port" =~ ^[0-9]+$ ]]; then
-            current_port="$detected_port"
-            save_port "$current_port"
-        fi
+    if [ -n "$all_configs" ]; then
+        IFS=':' read -ra configs_array <<< "$all_configs"
     fi
 
     local synfix_status=$(get_synfix_status)
@@ -1033,66 +1090,70 @@ show_header() {
         mtprotozig_installed=true
     fi
 
-    # ── ФОРМИРУЕМ СТРОКУ СТАТУСА ─────────────────────────────
-    local status_line=""
+    # ── ВЫВОДИМ ВСЕ НАЙДЕННЫЕ КОНФИГИ TELEMT ──────────────────
+    local first_config=true
     
-    if [ "$telemt_installed" = true ] && [ "$mtprotozig_installed" = true ]; then
-        # Оба установлены
-        local telemt_version=$(get_telemt_version)
-        local port_display=""
-        if [ -n "$current_port" ] && [[ "$current_port" =~ ^[0-9]+$ ]]; then
-            port_display=" Port: ${current_port}"
+    if [ ${#configs_array[@]} -gt 0 ]; then
+        for cfg in "${configs_array[@]}"; do
+            if [ -z "$cfg" ] || [ ! -f "$cfg" ]; then
+                continue
+            fi
+            
+            local _port=$(get_port_from_config "$cfg")
+            local _version=$(get_telemt_version)
+            local _online=$(get_telemt_online_for_config "$cfg")
+            local _mss_enabled=$(is_mss_enabled_for_config "$cfg" && echo "включен" || echo "отключен")
+            local _mss_bulk_enabled=$(is_mss_bulk_enabled_for_config "$cfg" && echo "включен" || echo "отключен")
+            local _synlimit_enabled=$(is_synlimit_enabled_for_config "$cfg" && echo "включен" || echo "отключен")
+            
+            # Формируем цвет для версии
+            local version_color=""
+            if [ "$_version" = "3.4.18" ]; then
+                version_color="${GREEN}"
+            elif [[ "$(printf '%s\n' "3.4.18" "$_version" | sort -V | head -n1)" != "3.4.18" ]]; then
+                version_color="${RED}"
+            else
+                version_color="${YELLOW}"
+            fi
+            
+            if [ "$first_config" = true ]; then
+                first_config=false
+            fi
+            
+            local port_display=""
+            if [ -n "$_port" ] && [[ "$_port" =~ ^[0-9]+$ ]]; then
+                port_display=" Port: ${_port}"
+            else
+                port_display=" (порт не определён)"
+            fi
+            
+            local mss_color="${GREEN}"
+            local mss_bulk_color="${GREEN}"
+            local synlimit_color="${GREEN}"
+            
+            [ "$_mss_enabled" = "включен" ] && mss_color="${RED}"
+            [ "$_mss_bulk_enabled" = "включен" ] && mss_bulk_color="${RED}"
+            [ "$_synlimit_enabled" = "включен" ] && synlimit_color="${RED}"
+            
+            echo -e "  ${BOLD}Telemt V:${NC} ${version_color}${_version}${NC}${port_display}"
+            echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}${_online}${NC}${BOLD} человек"
+            echo -e "  ${BOLD}Встроенный MSS:${NC} ${mss_color}${_mss_enabled}${NC}  |  ${BOLD}MSS_BULK:${NC} ${mss_bulk_color}${_mss_bulk_enabled}${NC}  |  ${BOLD}Synlimit:${NC} ${synlimit_color}${_synlimit_enabled}${NC}"
+        done
+    elif [ "$telemt_installed" = true ] && [ ${#configs_array[@]} -eq 0 ]; then
+        # Telemt установлен, но конфиги не найдены
+        local _version=$(get_telemt_version)
+        local version_color=""
+        if [ "$_version" = "3.4.18" ]; then
+            version_color="${GREEN}"
+        elif [[ "$(printf '%s\n' "3.4.18" "$_version" | sort -V | head -n1)" != "3.4.18" ]]; then
+            version_color="${RED}"
+        else
+            version_color="${YELLOW}"
         fi
-        status_line="Telemt V: ${GREEN}${telemt_version}${NC}${BOLD}${port_display}  |  Mtproto.zig: ${GREEN}установлен${NC}"
-    elif [ "$telemt_installed" = true ]; then
-        # Только Telemt
-        local telemt_version=$(get_telemt_version)
-        local port_display=""
-        if [ -n "$current_port" ] && [[ "$current_port" =~ ^[0-9]+$ ]]; then
-            port_display=" Port: ${current_port}"
-        fi
-        status_line="Telemt V: ${GREEN}${telemt_version}${NC}${port_display}"
-    elif [ "$mtprotozig_installed" = true ]; then
-        # Только MTProtoZig
-        status_line="Mtproto.zig: ${GREEN}установлен${NC}"
-    else
-        # Ничего не установлено
-        status_line="${RED}${NC}Прокси:${RED}${BOLD} не установлены${NC}"
+        echo -e "  ${BOLD}Telemt V:${NC} ${version_color}${_version}${NC} ${YELLOW}(конфиг не найден)${NC}"
     fi
-    
-    echo -e "  ${BOLD}${status_line}${NC}"
 
-    # ── ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ДЛЯ TELEMT ────────────────
-    if [ "$telemt_installed" = true ]; then
-        local online_count=$(get_telemt_online)
-        echo -e "  ${BOLD}Подключено к прокси Telemt:${NC} ${CYAN}$online_count${NC}${BOLD} человек"
-
-        local mss_status=""
-        local mss_bulk_status=""
-        local synlimit_status=""
-        
-        if is_mss_enabled; then
-            mss_status="${RED}включен${NC}"
-        else
-            mss_status="${GREEN}отключен${NC}"
-        fi
-        
-        if is_mss_bulk_enabled; then
-            mss_bulk_status="${RED}включен${NC}"
-        else
-            mss_bulk_status="${GREEN}отключен${NC}"
-        fi
-        
-        if is_synlimit_enabled; then
-            synlimit_status="${RED}включен${NC}"
-        else
-            synlimit_status="${GREEN}отключен${NC}"
-        fi
-        
-        echo -e "  ${BOLD}Встроенный MSS:${NC} $mss_status  |  ${BOLD}MSS_BULK:${NC} $mss_bulk_status  |  ${BOLD}Synlimit:${NC} $synlimit_status"
-    fi
-
-    # ── ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ ДЛЯ MTPROTOZIG ────────────
+    # ── ИНФОРМАЦИЯ О MTPROTOZIG ─────────────────────────────
     if [ "$mtprotozig_installed" = true ]; then
         local online_count=$(get_mtprotozig_online)
         if [ -n "$online_count" ] && [ "$online_count" -ge 0 ] 2>/dev/null; then
@@ -1100,6 +1161,11 @@ show_header() {
         else
             echo -e "  ${BOLD}Подключено к прокси Mtproto.zig:${NC} ${CYAN}0${NC} человек"
         fi
+    fi
+
+    # Если ничего не установлено
+    if [ "$telemt_installed" = false ] && [ "$mtprotozig_installed" = false ]; then
+        echo -e "  ${RED}${BOLD}Прокси не установлены${NC}"
     fi
 
     echo ""
