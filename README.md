@@ -105,7 +105,7 @@ mekopr
 curl -fsSL https://raw.githubusercontent.com/sleep3r/mtproto.zig/main/deploy/bootstrap.sh | sudo bash
 ```
 ```Bash
-sudo mtbuddy install --port 443 --domain rutube.ru --middle-proxy --yes
+sudo mtbuddy install --port 443 --domain rutube.ru --no-tcpmss --middle-proxy --yes
 ```
 2. Ставим скрипт MEKO
 ```Bash
