@@ -40,9 +40,8 @@ print_warning() {
 
 # ── Проверка зависимостей ──────────────────────────────────
 check_dependencies() {
-    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v0.6"
+    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v0.8"
     
-    # Проверяем наличие build-essential
     if ! command -v cc &> /dev/null; then
         echo ""
         print_info "Для работы необходимо установить следующие компоненты:"
@@ -188,6 +187,31 @@ resolve_ip() {
     nslookup "$host" 2>/dev/null | grep -E 'Address: ' | grep -v '#' | awk '{print $2}' | tr '\n' ', ' | sed 's/, $//'
 }
 
+# ── Определение SNI для IP ──────────────────────────────────
+get_sni_from_ip() {
+    local ip="$1"
+    local port="${2:-443}"
+    
+    # Пробуем подключиться с разными популярными доменами
+    # Пробуем сначала просто через openssl без SNI
+    local cert_info=$(echo | timeout 5 openssl s_client -connect "$ip:$port" 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed 's/^.*CN=//' | sed 's/\/.*$//')
+    
+    if [ -n "$cert_info" ]; then
+        echo "$cert_info"
+        return 0
+    fi
+    
+    # Если не получилось — пробуем через curl с выводом сертификата
+    local curl_cert=$(timeout 5 curl -vI --connect-timeout 3 "https://$ip:$port" 2>&1 | grep -E "subject:" | head -1 | sed 's/.*CN=//' | sed 's/\/.*$//' | tr -d ' ')
+    
+    if [ -n "$curl_cert" ]; then
+        echo "$curl_cert"
+        return 0
+    fi
+    
+    return 1
+}
+
 # ── Парсинг поля из вывода openssl -brief ──────────────────
 parse_field() {
     local text="$1"
@@ -200,24 +224,45 @@ check_site() {
     local domain="$1"
     local port="${2:-443}"
     local connect="${domain}:${port}"
+    local is_ip=false
+    local sni=""
+    
+    # Проверяем, является ли домен IP-адресом
+    if [[ "$domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        is_ip=true
+        sni=$(get_sni_from_ip "$domain" "$port")
+        if [ -n "$sni" ]; then
+            echo -e "\n${CYAN}🔍 SNI определён: ${sni}${NC}"
+        else
+            sni="$domain"
+        fi
+    fi
     
     echo -e "\n${BOLD}🔎 ${domain}:${port}${NC}"
     
-    # IP-адреса
-    local ip_str=$(resolve_ip "$domain")
-    if [ -n "$ip_str" ]; then
-        echo -e "\n${CYAN}🌐 IP: ${NC}$ip_str"
+    # IP-адреса (для доменов)
+    if [ "$is_ip" = false ]; then
+        local ip_str=$(resolve_ip "$domain")
+        if [ -n "$ip_str" ]; then
+            echo -e "\n${CYAN}🌐 IP: ${NC}$ip_str"
+        fi
     fi
     echo ""
     
     # ── PQ-проверка через pqfetch ──────────────────────────
     echo -e "${CYAN}━━━ PQ-подключение ━━━${NC}"
     export PATH="$HOME/.cargo/bin:$PATH"
-    local pq_output=$(pqfetch "$domain" 2>&1 || true)
+    
+    # Для IP используем SNI (если определён)
+    local pq_target="$domain"
+    if [ "$is_ip" = true ] && [ -n "$sni" ] && [ "$sni" != "$domain" ]; then
+        pq_target="$sni"
+    fi
+    
+    local pq_output=$(pqfetch "$pq_target" 2>&1 || true)
     
     if echo "$pq_output" | grep -qi "X25519MLKEM768"; then
         echo -e "${GREEN}✅ Статус: поддерживается${NC}"
-        # Показываем детали если есть
         echo "$pq_output" | head -1 | while read line; do
             if [ -n "$line" ]; then
                 echo "  $line"
@@ -229,7 +274,7 @@ check_site() {
         return 0
     fi
     
-    # PQ не прошёл — проверяем обычный TLS
+    # PQ не прошёл
     echo -e "${RED}🔸 Статус: не поддерживается${NC}"
     
     # Показываем причину
@@ -242,9 +287,17 @@ check_site() {
     # ── Обычное TLS через openssl -brief ──────────────────
     echo -e "${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
     
+    local tls_target="$domain"
+    local tls_sni="$domain"
+    
+    # Для IP используем SNI
+    if [ "$is_ip" = true ] && [ -n "$sni" ] && [ "$sni" != "$domain" ]; then
+        tls_sni="$sni"
+    fi
+    
     local tls_output=""
     if command -v openssl &> /dev/null; then
-        tls_output=$(echo | timeout 5 openssl s_client -connect "$connect" -servername "$domain" -brief 2>/dev/null || true)
+        tls_output=$(echo | timeout 5 openssl s_client -connect "$connect" -servername "$tls_sni" -brief 2>/dev/null || true)
     fi
     
     if [ -n "$tls_output" ] && echo "$tls_output" | grep -qi "CONNECTION ESTABLISHED"; then
@@ -346,17 +399,14 @@ main() {
     echo -e "  ${DIM}═════════════════════════════════════════════════${NC}"
     echo ""
     
-    # Проверяем зависимости с запросом подтверждения
     if ! check_dependencies; then
         return 0
     fi
     
-    # Проверяем и устанавливаем Rust + pqfetch
     if ! install_pqfetch; then
         return 0
     fi
     
-    # Цикл проверки
     while true; do
         echo ""
         echo -e "  ${BOLD}Введите ссылку на прокси для проверки:${NC}"
@@ -369,7 +419,6 @@ main() {
         echo -en "  ${BOLD}Ввод:${NC} "
         read -r proxy_input
         
-        # Проверка на выход
         if [[ "$proxy_input" == "0" || "$proxy_input" =~ ^[nN]$ || "$proxy_input" =~ ^[qQ]$ ]]; then
             echo ""
             print_info "Возврат в главное меню..."
@@ -377,7 +426,6 @@ main() {
             return 0
         fi
         
-        # Проверка на пустой ввод
         if [ -z "$proxy_input" ]; then
             print_warning "Вы ничего не ввели. Попробуйте снова или введите 0 для выхода."
             continue
@@ -395,7 +443,6 @@ main() {
             return 0
         fi
         
-        # Очищаем экран после Enter
         clear_screen
         echo ""
         echo -e "  ${BOLD}${CYAN}🔍 ПРОВЕРКА ПРОКСИ НА PQ-БЕЗОПАСНОСТЬ${NC}"
