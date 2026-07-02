@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================
-# SNI Checker - проверка TLS и PQ через pqfetch
+# SNI Checker - проверка TLS и PQ
 # По мотивам SNI_cheker бота
 # =============================================
 
@@ -140,103 +140,198 @@ install_pqfetch() {
     return 0
 }
 
-# ── Получение IP ─────────────────────────────────────────
+# ── Получение IP-адресов ──────────────────────────────────
 resolve_ip() {
     local host="$1"
-    nslookup "$host" 2>/dev/null | grep -E 'Address: ' | grep -v '#' | awk '{print $2}' | tr '\n' ', ' | sed 's/, $//'
+    nslookup "$host" 2>/dev/null | grep -E 'Address: ' | grep -v '#' | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//'
 }
 
-# ── Проверка через pqfetch ──────────────────────────────
-check_with_pqfetch() {
-    local target="$1"
-    local connect="${2:-$target:443}"
-    local is_ip="$3"
-    local sni="$4"
+# ── Проверка IP через pqfetch ─────────────────────────────
+check_ip_pqfetch() {
+    local ip="$1"
+    local sni="$2"
+    local port="${3:-443}"
     
-    local output=$(pqfetch "$target" 2>&1 || true)
+    export PATH="$HOME/.cargo/bin:$PATH"
+    local result=$(pqfetch "$ip" 2>&1 || true)
     
-    # Если pqfetch не смог — пробуем через curl
-    if [ -z "$output" ] || echo "$output" | grep -qi "error"; then
-        local curl_out=$(timeout 10 curl -vI --tlsv1.3 --connect-timeout 5 "https://$connect" 2>&1 | grep -E "SSL connection|TLS|subject" | head -5 || true)
-        if [ -n "$curl_out" ]; then
-            echo "CURL:$curl_out"
-            return 0
-        fi
-        return 1
+    # Парсим результат
+    local pq_support="no"
+    local tls_version=""
+    local cipher=""
+    local temp_key=""
+    local cert=""
+    
+    if echo "$result" | grep -qi "X25519MLKEM768"; then
+        pq_support="yes"
+        tls_version=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $2}')
+        cipher=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $3}')
+    elif echo "$result" | grep -qi "X25519"; then
+        pq_support="no"
+        temp_key="X25519"
+        tls_version=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $2}')
+        cipher=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $3}')
     fi
     
-    echo "$output"
-    return 0
+    echo "$pq_support|$tls_version|$cipher|$temp_key|$result"
 }
 
-# ── Проверка ─────────────────────────────────────────────
-check_site() {
+# ── Проверка одного IP ─────────────────────────────────────
+check_single_ip() {
+    local ip="$1"
+    local sni="$2"
+    local port="${3:-443}"
+    
+    local result=$(check_ip_pqfetch "$ip" "$sni" "$port")
+    local pq_support=$(echo "$result" | cut -d'|' -f1)
+    local tls_version=$(echo "$result" | cut -d'|' -f2)
+    local cipher=$(echo "$result" | cut -d'|' -f3)
+    local temp_key=$(echo "$result" | cut -d'|' -f4)
+    
+    if [ "$pq_support" = "yes" ]; then
+        echo -e "  🟢 $ip — PQ OK"
+        [ -n "$tls_version" ] && echo -e "    $tls_version | $cipher"
+        return 0
+    else
+        if echo "$temp_key" | grep -qi "X25519"; then
+            echo -e "  🔴 $ip — PQ нет, маркер ДА"
+            [ -n "$tls_version" ] && echo -e "    $tls_version | $cipher | $temp_key"
+            return 1
+        else
+            echo -e "  🟡 $ip — PQ нет, но маркер НЕТ"
+            [ -n "$tls_version" ] && echo -e "    $tls_version | $cipher"
+            return 2
+        fi
+    fi
+}
+
+# ── Проверка домена ────────────────────────────────────────
+check_domain() {
     local domain="$1"
     local port="${2:-443}"
-    local connect="${domain}:${port}"
-    local is_ip=false
-    local sni=""
-    
-    # Проверяем IP
-    if [[ "$domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        is_ip=true
-        # Пытаемся определить SNI (для IP это не критично, pqfetch сам определит)
-        sni="$domain"
-    fi
+    local ip_list=$(resolve_ip "$domain")
     
     echo -e "\n${BOLD}🔎 ${domain}:${port}${NC}"
     
-    if [ "$is_ip" = false ]; then
-        local ip_str=$(resolve_ip "$domain")
-        [ -n "$ip_str" ] && echo -e "\n${CYAN}🌐 IP: ${NC}$ip_str"
+    if [ -n "$ip_list" ]; then
+        echo -e "\n${CYAN}🌐 IP: ${NC}$ip_list"
     fi
-    echo ""
     
-    # ── Проверка через pqfetch ──────────────────────────────
+    # Проверяем каждый IP
+    echo -e "\n${CYAN}━━━ Короткая проверка по IP ━━━${NC}"
+    echo "  SNI: $domain"
+    
+    local has_marker=false
+    local any_ok=false
+    local ip_array=($ip_list)
+    
+    for ip in "${ip_array[@]}"; do
+        if [ -n "$ip" ]; then
+            check_single_ip "$ip" "$domain" "$port"
+            local ret=$?
+            if [ $ret -eq 1 ]; then
+                has_marker=true
+            fi
+            if [ $ret -eq 0 ]; then
+                any_ok=true
+            fi
+        fi
+    done
+    
+    if [ "$has_marker" = true ]; then
+        echo ""
+        echo -e "${YELLOW}⚠️ Один из IP-адресов домена имеет маркер!${NC}"
+        echo -e "${YELLOW}Риск блокировки на ТСПУ для iOS клиентов${NC}"
+    fi
+    
+    # ── Основная проверка через pqfetch ─────────────────────
+    echo ""
     echo -e "${CYAN}━━━ PQ-подключение ━━━${NC}"
     
     export PATH="$HOME/.cargo/bin:$PATH"
-    local result=$(check_with_pqfetch "$domain" "$connect" "$is_ip" "$sni")
+    local pq_result=$(pqfetch "$domain" 2>&1 || true)
     
-    if [ -n "$result" ] && echo "$result" | grep -qi "X25519MLKEM768"; then
-        # Парсим вывод pqfetch
-        local proto=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $2}')
-        local cipher=$(echo "$result" | grep -E "tls" | head -1 | awk '{print $3}')
+    if echo "$pq_result" | grep -qi "X25519MLKEM768"; then
+        local proto=$(echo "$pq_result" | grep -E "tls" | head -1 | awk '{print $2}')
+        local cipher=$(echo "$pq_result" | grep -E "tls" | head -1 | awk '{print $3}')
+        local cert=$(echo "$pq_result" | grep -E "cert" | head -1 | sed 's/^.*CN=//' | cut -d' ' -f1)
         
         echo -e "${GREEN}✅ Статус: поддерживается${NC}"
         [ -n "$proto" ] && echo "  Протокол: $proto"
         [ -n "$cipher" ] && echo "  Шифронабор: $cipher"
+        [ -n "$cert" ] && echo "  Сертификат: $cert"
+        echo ""
+        echo -e "${GREEN}━━━ ВЕРДИКТ ━━━${NC}"
+        echo -e "${GREEN}🟢 Маркер: НЕТ — сервер принимает X25519MLKEM768${NC}"
+    else
+        echo -e "${RED}🔸 Статус: не поддерживается${NC}"
+        echo ""
+        echo -e "${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
+        
+        local curl_out=$(timeout 10 curl -vI --tlsv1.3 --connect-timeout 5 "https://$domain:$port" 2>&1 | grep -E "SSL connection|TLS|subject|Server Temp Key" | head -5 || true)
+        
+        if [ -n "$curl_out" ]; then
+            echo -e "${GREEN}🔹 Статус: OK${NC}"
+            echo "$curl_out"
+            echo ""
+            
+            if echo "$curl_out" | grep -qi "X25519"; then
+                echo -e "${RED}━━━ ВЕРДИКТ ━━━${NC}"
+                echo -e "${RED}🔴 МАРКЕР: ДА${NC}"
+                echo -e "${RED}PQ не поддерживается + Peer Temp Key = X25519${NC}"
+                echo -e "${YELLOW}⚠️ Риск блокировки на ТСПУ для iOS клиентов${NC}"
+            else
+                echo -e "${GREEN}━━━ ВЕРДИКТ ━━━${NC}"
+                echo -e "${GREEN}🟢 Маркер: НЕТ${NC}"
+                echo -e "${GREEN}PQ не поддерживается, но Peer Temp Key не X25519${NC}"
+            fi
+        else
+            echo -e "${RED}❌ Не удалось подключиться по TLS${NC}"
+            echo ""
+            echo -e "${RED}━━━ ВЕРДИКТ ━━━${NC}"
+            echo -e "${RED}🔴 Не удалось проверить${NC}"
+        fi
+    fi
+    echo ""
+}
+
+# ── Проверка IP напрямую ──────────────────────────────────
+check_ip_direct() {
+    local ip="$1"
+    local port="${2:-443}"
+    
+    echo -e "\n${BOLD}🔎 ${ip}:${port}${NC}"
+    echo ""
+    
+    # ── PQ-проверка через pqfetch ──────────────────────────
+    echo -e "${CYAN}━━━ PQ-подключение ━━━${NC}"
+    
+    export PATH="$HOME/.cargo/bin:$PATH"
+    local pq_result=$(pqfetch "$ip" 2>&1 || true)
+    
+    if echo "$pq_result" | grep -qi "X25519MLKEM768"; then
+        local proto=$(echo "$pq_result" | grep -E "tls" | head -1 | awk '{print $2}')
+        local cipher=$(echo "$pq_result" | grep -E "tls" | head -1 | awk '{print $3}')
+        local cert=$(echo "$pq_result" | grep -E "cert" | head -1 | sed 's/^.*CN=//' | cut -d' ' -f1)
+        
+        echo -e "${GREEN}✅ Статус: поддерживается${NC}"
+        [ -n "$proto" ] && echo "  Протокол: $proto"
+        [ -n "$cipher" ] && echo "  Шифронабор: $cipher"
+        [ -n "$cert" ] && echo "  Сертификат: $cert"
         echo ""
         echo -e "${GREEN}━━━ ВЕРДИКТ ━━━${NC}"
         echo -e "${GREEN}🟢 Маркер: НЕТ — сервер принимает X25519MLKEM768${NC}"
         return 0
     fi
     
-    # Проверяем на X25519 (без PQ)
-    if [ -n "$result" ] && echo "$result" | grep -qi "X25519"; then
-        echo -e "${RED}🔸 Статус: не поддерживается${NC}"
-        echo ""
-        echo -e "${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
-        echo -e "${GREEN}🔹 Статус: OK${NC}"
-        
-        local cert=$(echo "$result" | grep -E "cert" | head -1 | sed 's/^.*CN=//' | cut -d' ' -f1)
-        [ -n "$cert" ] && echo "  Сертификат: $cert"
-        echo "  Peer Temp Key: X25519"
-        echo ""
-        echo -e "${RED}━━━ ВЕРДИКТ ━━━${NC}"
-        echo -e "${RED}🔴 МАРКЕР: ДА${NC}"
-        echo -e "${RED}PQ не поддерживается + Peer Temp Key = X25519${NC}"
-        echo -e "${YELLOW}⚠️ Риск блокировки на ТСПУ для iOS клиентов${NC}"
-        return 0
-    fi
-    
-    # Если pqfetch не дал результата
+    # PQ не прошёл
     echo -e "${RED}🔸 Статус: не поддерживается${NC}"
     echo ""
     
-    # ── Пробуем через curl ──────────────────────────────────
+    # ── Обычный TLS через curl ──────────────────────────────
     echo -e "${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
-    local curl_out=$(timeout 10 curl -vI --tlsv1.3 --connect-timeout 5 "https://$connect" 2>&1 | grep -E "SSL connection|TLS|subject|Server Temp Key" | head -5 || true)
+    
+    local curl_out=$(timeout 10 curl -vI --tlsv1.3 --connect-timeout 5 "https://$ip:$port" 2>&1 | grep -E "SSL connection|TLS|subject|Server Temp Key" | head -5 || true)
     
     if [ -n "$curl_out" ]; then
         echo -e "${GREEN}🔹 Статус: OK${NC}"
@@ -292,7 +387,12 @@ parse_and_check() {
         fi
     fi
     
-    check_site "$domain" "$port"
+    # Определяем, IP это или домен
+    if [[ "$domain" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        check_ip_direct "$domain" "$port"
+    else
+        check_domain "$domain" "$port"
+    fi
 }
 
 # ── Очистка ──────────────────────────────────────────────────
