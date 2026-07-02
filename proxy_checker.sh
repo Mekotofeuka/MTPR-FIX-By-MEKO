@@ -1,8 +1,9 @@
 #!/bin/bash
 
-
-# PQC Check Script 
-
+# =============================================
+# PQC Check Script для Ubuntu 24
+# Проверка поддержки X25519MLKEM768
+# =============================================
 
 set -e
 
@@ -39,20 +40,17 @@ print_warning() {
 
 # ── Проверка зависимостей ──────────────────────────────────
 check_dependencies() {
-    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v0.1"
+    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v1"
     
-    apt update -qq
-    
-    # Устанавливаем build-essential (компилятор C) 
+    # Устанавливаем build-essential если нет
     if ! command -v cc &> /dev/null; then
-        print_info "Устанавливаю build-essential (компилятор C)..."
+        print_info "Устанавливаю build-essential..."
         apt install -y build-essential
         print_success "build-essential установлен"
     else
         print_success "build-essential уже установлен"
     fi
     
-    # Остальные зависимости
     local missing=()
     for cmd in openssl curl nslookup; do
         if ! command -v $cmd &> /dev/null; then
@@ -70,28 +68,28 @@ check_dependencies() {
     fi
 }
 
-# ── Установка Rust и pqfetch (только если их нет) ──────────
+# ── Установка Rust и pqfetch ──────────────────────────────
 install_pqfetch() {
     print_header "УСТАНОВКА RUST И PQFECTH"
     
-    local need_install=false
+    local need_rust=false
+    local need_pqfetch=false
     
     if ! command -v rustc &> /dev/null; then
-        need_install=true
+        need_rust=true
     fi
     
     if ! command -v pqfetch &> /dev/null; then
-        need_install=true
+        need_pqfetch=true
     fi
     
-    if [ "$need_install" = false ]; then
+    if [ "$need_rust" = false ] && [ "$need_pqfetch" = false ]; then
         print_success "Rust уже установлен"
         print_success "pqfetch уже установлен"
         return 0
     fi
     
-    # Проверка наличия Rust
-    if ! command -v rustc &> /dev/null; then
+    if [ "$need_rust" = true ]; then
         print_info "Устанавливаю Rust..."
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         source "$HOME/.cargo/env"
@@ -100,8 +98,7 @@ install_pqfetch() {
         print_success "Rust уже установлен"
     fi
     
-    # Проверка наличия pqfetch
-    if ! command -v pqfetch &> /dev/null; then
+    if [ "$need_pqfetch" = true ]; then
         print_info "Устанавливаю pqfetch..."
         source "$HOME/.cargo/env"
         cargo install pqfetch
@@ -110,7 +107,6 @@ install_pqfetch() {
         print_success "pqfetch уже установлен"
     fi
     
-    # Добавляем в PATH
     if ! grep -q '\.cargo/bin' ~/.bashrc 2>/dev/null; then
         echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
     fi
@@ -122,19 +118,16 @@ check_site() {
     local domain="$1"
     local port="${2:-443}"
     
-    echo ""
-    echo -e "${BOLD}🔎 ${domain}:${port}${NC}"
+    echo -e "\n${BOLD}🔎 ${domain}:${port}${NC}"
     
     # IP-адреса
-    echo ""
-    echo -e "${CYAN}🌐 IP-адреса:${NC}"
+    echo -e "\n${CYAN}🌐 IP-адреса:${NC}"
     nslookup $domain 2>/dev/null | grep -E 'Address: ' | grep -v '#' | awk '{print $2}' | head -3 | while read ip; do
         echo "  $ip"
     done
     
     # PQ-проверка
-    echo ""
-    echo -e "${CYAN}━━━ PQ-подключение (X25519MLKEM768) ━━━${NC}"
+    echo -e "\n${CYAN}━━━ PQ-подключение (X25519MLKEM768) ━━━${NC}"
     PQFECTH_OUTPUT=$(pqfetch $domain 2>&1 || true)
     
     if echo "$PQFECTH_OUTPUT" | grep -qi "X25519MLKEM768"; then
@@ -149,8 +142,7 @@ check_site() {
     fi
     
     # Обычное TLS
-    echo ""
-    echo -e "${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
+    echo -e "\n${CYAN}━━━ Обычное TLS-подключение ━━━${NC}"
     TLS_INFO=$(echo | openssl s_client -connect $domain:$port -servername $domain 2>/dev/null | grep -E "Protocol|Cipher|Server Temp Key" | head -4)
     
     if [ -n "$TLS_INFO" ]; then
@@ -160,8 +152,7 @@ check_site() {
     fi
     
     # Вердикт
-    echo ""
-    echo -e "${CYAN}━━━ ВЕРДИКТ ━━━${NC}"
+    echo -e "\n${CYAN}━━━ ВЕРДИКТ ━━━${NC}"
     if echo "$PQFECTH_OUTPUT" | grep -qi "X25519MLKEM768"; then
         echo -e "${GREEN}🟢 PQ-безопасен (X25519MLKEM768)${NC}"
     elif echo "$PQFECTH_OUTPUT" | grep -qi "X25519"; then
@@ -182,7 +173,6 @@ parse_and_check() {
     
     # Проверяем, является ли входная строка Telegram-ссылкой
     if echo "$input" | grep -qi "t.me/proxy\|tg://proxy"; then
-        # Извлекаем server=... и port=...
         domain=$(echo "$input" | grep -oP 'server=\K[^&]+' 2>/dev/null || echo "")
         port=$(echo "$input" | grep -oP 'port=\K[^&]+' 2>/dev/null || echo "443")
         secret=$(echo "$input" | grep -oP 'secret=\K[^&]+' 2>/dev/null || echo "")
@@ -192,8 +182,7 @@ parse_and_check() {
             return 1
         fi
         
-        echo ""
-        echo -e "${CYAN}━━━ РАСПАРСЕНО ИЗ ССЫЛКИ ━━━${NC}"
+        echo -e "\n${CYAN}━━━ РАСПАРСЕНО ИЗ ССЫЛКИ ━━━${NC}"
         echo -e "  ${BOLD}Сервер:${NC} $domain"
         echo -e "  ${BOLD}Порт:${NC} $port"
         if [ -n "$secret" ]; then
@@ -219,7 +208,7 @@ main() {
     echo -e "  ${DIM}═════════════════════════════════════════════════${NC}"
     echo ""
     
-    # Проверяем зависимости один раз при входе
+    # Проверяем зависимости один раз
     check_dependencies
     install_pqfetch
     
@@ -236,7 +225,7 @@ main() {
         echo -en "  ${BOLD}Ввод:${NC} "
         read -r proxy_input
         
-        # Проверка на выход (0, n, N, q, Q)
+        # Проверка на выход
         if [[ "$proxy_input" == "0" || "$proxy_input" =~ ^[nN]$ || "$proxy_input" =~ ^[qQ]$ ]]; then
             echo ""
             print_info "Возврат в главное меню..."
