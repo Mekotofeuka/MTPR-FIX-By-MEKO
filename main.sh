@@ -31,6 +31,14 @@ check_root
 # ── Файл для сохранения пути к конфигу ──────────────────────
 CONFIG_PATH_FILE="/opt/mtpr-simple/config_path"
 
+# ── Функция обрезки пробелов ──────────────────────────────
+trim() {
+    local var="$1"
+    var="${var#"${var%%[![:space:]]*}"}"
+    var="${var%"${var##*[![:space:]]}"}"
+    printf '%s' "$var"
+}
+
 # ── Функции для работы с TOML ──────────────
 _toml_get_value() {
     local _key="$1" _file="$2"
@@ -88,8 +96,9 @@ detect_all_telemt_configs() {
         local _args_list
         _args_list=$(ps -eo args 2>/dev/null | grep '[t]elemt' | grep -v 'telemt-panel' | grep -v 'telemt_panel' | grep -oE '/[^ ]+\.toml' | sort -u)
         for _arg in $_args_list; do
-            if [ -f "$_arg" ] && ! _is_excluded_path "$_arg" && _looks_like_telemt_config "$_arg"; then
-                if ! echo "$SEEN_PATHS" | grep -q "$_arg"; then
+            _arg=$(trim "$_arg")
+            if [ -n "$_arg" ] && [ -f "$_arg" ] && ! _is_excluded_path "$_arg" && _looks_like_telemt_config "$_arg"; then
+                if ! echo "$SEEN_PATHS" | grep -qF "$_arg"; then
                     SEEN_PATHS="${SEEN_PATHS}${_arg}\n"
                     FOUND_CONFIGS="${FOUND_CONFIGS}${_arg}:"
                 fi
@@ -100,8 +109,9 @@ detect_all_telemt_configs() {
     # 2. Поиск конфигов в стандартных местах
     local _cf
     for _cf in /etc/telemt/telemt.toml /etc/telemt/config.toml /etc/telemt.toml /opt/telemt/config.toml /opt/telemt/telemt.toml; do
-        if [ -f "$_cf" ] && ! _is_excluded_path "$_cf" && _looks_like_telemt_config "$_cf"; then
-            if ! echo "$SEEN_PATHS" | grep -q "$_cf"; then
+        _cf=$(trim "$_cf")
+        if [ -n "$_cf" ] && [ -f "$_cf" ] && ! _is_excluded_path "$_cf" && _looks_like_telemt_config "$_cf"; then
+            if ! echo "$SEEN_PATHS" | grep -qF "$_cf"; then
                 SEEN_PATHS="${SEEN_PATHS}${_cf}\n"
                 FOUND_CONFIGS="${FOUND_CONFIGS}${_cf}:"
             fi
@@ -110,17 +120,17 @@ detect_all_telemt_configs() {
     
     # 3. Проверяем сохранённый путь
     if [ -f "$CONFIG_PATH_FILE" ] && [ -s "$CONFIG_PATH_FILE" ]; then
-        local _saved_path=$(cat "$CONFIG_PATH_FILE")
-        if [ "$_saved_path" != "skip" ] && [ -f "$_saved_path" ] && _looks_like_telemt_config "$_saved_path"; then
-            if ! echo "$SEEN_PATHS" | grep -q "$_saved_path"; then
+        local _saved_path=$(trim "$(cat "$CONFIG_PATH_FILE")")
+        if [ -n "$_saved_path" ] && [ "$_saved_path" != "skip" ] && [ -f "$_saved_path" ] && _looks_like_telemt_config "$_saved_path"; then
+            if ! echo "$SEEN_PATHS" | grep -qF "$_saved_path"; then
                 SEEN_PATHS="${SEEN_PATHS}${_saved_path}\n"
                 FOUND_CONFIGS="${FOUND_CONFIGS}${_saved_path}:"
             fi
         fi
     fi
     
-    # Убираем последнее двоеточие
-    FOUND_CONFIGS="${FOUND_CONFIGS%:}"
+    # Убираем последнее двоеточие и лишние пробелы
+    FOUND_CONFIGS=$(trim "${FOUND_CONFIGS%:}")
     
     echo "$FOUND_CONFIGS"
 }
@@ -128,32 +138,65 @@ detect_all_telemt_configs() {
 # ── Функция получения порта из конфига ──────────────────────
 get_port_from_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
+    
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
         echo ""
         return 1
     fi
-    _toml_get_value "port" "$_cfg"
+    
+    # Способ 1: Прямой grep + sed (самый надёжный)
+    local _port=$(grep -E '^[[:space:]]*port[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*port[[:space:]]*=[[:space:]]*//; s/[^0-9]//g')
+    
+    # Способ 2: Если не нашлось — пробуем через _toml_get_value
+    if [ -z "$_port" ]; then
+        _port=$(_toml_get_value "port" "$_cfg")
+    fi
+    
+    # Способ 3: Если всё ещё нет — пробуем через grep без sed (вдруг там кавычки)
+    if [ -z "$_port" ]; then
+        _port=$(grep -E '^[[:space:]]*port[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+    fi
+    
+    # Проверяем, что порт — это число
+    if [[ "$_port" =~ ^[0-9]+$ ]]; then
+        echo "$_port"
+    else
+        echo ""
+    fi
+    
+    return 0
 }
 
 # ── Функция получения онлайна для конкретного конфига ────────
 get_telemt_online_for_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
+    
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
-        echo ""
+        echo "0"
         return 1
     fi
+    
     local _port=$(get_port_from_config "$_cfg")
     if [ -z "$_port" ]; then
-        echo ""
+        echo "0"
         return 1
     fi
-    # Пробуем через API (если порт API 9091 или вычисляем)
-    curl -s "http://127.0.0.1:9091/v1/stats/users/active-ips" 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' '
+    
+    # Пробуем через API
+    local _online=$(curl -s "http://127.0.0.1:9091/v1/stats/users/active-ips" 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' ')
+    if [ -z "$_online" ] || [ "$_online" -lt 0 ] 2>/dev/null; then
+        echo "0"
+    else
+        echo "$_online"
+    fi
 }
 
 # ── Проверка MSS в конкретном конфиге ──────────────────────
 is_mss_enabled_for_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
         return 1
     fi
@@ -165,6 +208,7 @@ is_mss_enabled_for_config() {
 
 is_mss_bulk_enabled_for_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
         return 1
     fi
@@ -176,6 +220,7 @@ is_mss_bulk_enabled_for_config() {
 
 is_synlimit_enabled_for_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
         return 1
     fi
@@ -996,10 +1041,19 @@ get_telemt_version() {
 # ── Функция получения онлайна Telemt для конфига ────────────
 get_telemt_online_for_config() {
     local _cfg="$1"
+    _cfg=$(trim "$_cfg")
+    
     if [ -z "$_cfg" ] || [ ! -f "$_cfg" ]; then
         echo "0"
         return 1
     fi
+    
+    local _port=$(get_port_from_config "$_cfg")
+    if [ -z "$_port" ]; then
+        echo "0"
+        return 1
+    fi
+    
     # Пробуем через API
     local _online=$(curl -s "http://127.0.0.1:9091/v1/stats/users/active-ips" 2>/dev/null | grep -o '"active_ips":\[[^]]*\]' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | wc -l | tr -d ' ')
     if [ -z "$_online" ] || [ "$_online" -lt 0 ] 2>/dev/null; then
@@ -1031,7 +1085,7 @@ get_online_count() {
 show_header() {
     clear_screen
     echo ""
-    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.34${NC}"
+    echo -e "  ${BOLD}MTProto Fixer by MEKO v1.36${NC}"
     echo -e "  ${DIM}===========================${NC}"
     echo ""
 
