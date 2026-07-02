@@ -40,7 +40,9 @@ print_warning() {
 
 # ── Проверка зависимостей ──────────────────────────────────
 check_dependencies() {
-    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v1"
+    print_header "ПРОВЕРКА ЗАВИСИМОСТЕЙ v2"
+    
+    apt update -qq 2>/dev/null || true
     
     # Устанавливаем build-essential если нет
     if ! command -v cc &> /dev/null; then
@@ -68,6 +70,35 @@ check_dependencies() {
     fi
 }
 
+# ── Проверка наличия Rust и pqfetch ────────────────────────
+check_rust_pqfetch() {
+    # Проверяем Rust через ~/.cargo/bin/rustc
+    if [ -f "$HOME/.cargo/bin/rustc" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+        return 0
+    fi
+    
+    # Проверяем через which
+    if command -v rustc &> /dev/null; then
+        return 0
+    fi
+    
+    return 1
+}
+
+check_pqfetch() {
+    if [ -f "$HOME/.cargo/bin/pqfetch" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+        return 0
+    fi
+    
+    if command -v pqfetch &> /dev/null; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # ── Установка Rust и pqfetch ──────────────────────────────
 install_pqfetch() {
     print_header "УСТАНОВКА RUST И PQFECTH"
@@ -75,11 +106,11 @@ install_pqfetch() {
     local need_rust=false
     local need_pqfetch=false
     
-    if ! command -v rustc &> /dev/null; then
+    if ! check_rust_pqfetch; then
         need_rust=true
     fi
     
-    if ! command -v pqfetch &> /dev/null; then
+    if ! check_pqfetch; then
         need_pqfetch=true
     fi
     
@@ -92,7 +123,7 @@ install_pqfetch() {
     if [ "$need_rust" = true ]; then
         print_info "Устанавливаю Rust..."
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env"
+        export PATH="$HOME/.cargo/bin:$PATH"
         print_success "Rust установлен"
     else
         print_success "Rust уже установлен"
@@ -100,16 +131,13 @@ install_pqfetch() {
     
     if [ "$need_pqfetch" = true ]; then
         print_info "Устанавливаю pqfetch..."
-        source "$HOME/.cargo/env"
+        export PATH="$HOME/.cargo/bin:$PATH"
         cargo install pqfetch
         print_success "pqfetch установлен"
     else
         print_success "pqfetch уже установлен"
     fi
     
-    if ! grep -q '\.cargo/bin' ~/.bashrc 2>/dev/null; then
-        echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
-    fi
     export PATH="$HOME/.cargo/bin:$PATH"
 }
 
@@ -128,6 +156,7 @@ check_site() {
     
     # PQ-проверка
     echo -e "\n${CYAN}━━━ PQ-подключение (X25519MLKEM768) ━━━${NC}"
+    export PATH="$HOME/.cargo/bin:$PATH"
     PQFECTH_OUTPUT=$(pqfetch $domain 2>&1 || true)
     
     if echo "$PQFECTH_OUTPUT" | grep -qi "X25519MLKEM768"; then
@@ -173,6 +202,7 @@ parse_and_check() {
     
     # Проверяем, является ли входная строка Telegram-ссылкой
     if echo "$input" | grep -qi "t.me/proxy\|tg://proxy"; then
+        # Извлекаем server=... и port=...
         domain=$(echo "$input" | grep -oP 'server=\K[^&]+' 2>/dev/null || echo "")
         port=$(echo "$input" | grep -oP 'port=\K[^&]+' 2>/dev/null || echo "443")
         secret=$(echo "$input" | grep -oP 'secret=\K[^&]+' 2>/dev/null || echo "")
